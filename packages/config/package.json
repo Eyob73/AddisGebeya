@@ -1,0 +1,11 @@
+{
+  "name": "@addisgebeya/config",
+  "version": "0.1.0",
+  "private": true,
+  "exports": {
+    "./tsconfig/*": "./tsconfig/*"
+  },
+  "files": [
+    "tsconfig"
+  ]
+}

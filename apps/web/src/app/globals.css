@@ -1,0 +1,189 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* Brand & Semantic Colors */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-light: var(--primary-light);
+  --color-primary-deep: var(--primary-deep);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-cta: var(--cta);
+  --color-cta-hover: var(--cta-hover);
+  --color-cta-foreground: var(--cta-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Stitch Surface & Container Tokens */
+  --color-surface: var(--surface);
+  --color-surface-low: var(--surface-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-high: var(--surface-high);
+  --color-surface-highest: var(--surface-highest);
+  --color-surface-media: var(--surface-media);
+  --color-text-secondary: var(--text-secondary);
+
+  /* Typography */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-label: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+
+  /* Radii */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+}
+
+:root {
+  --radius: 0.5rem;
+
+  /* Brand Palette: AddisGebeya Shoes */
+  --primary: #0e5a6b;
+  --primary-hover: #0a4654;
+  --primary-deep: #00414f;
+  --primary-light: #ebf6f8;
+  --primary-foreground: #ffffff;
+
+  --cta: #b13a0a;
+  --cta-hover: #8e2e08;
+  --cta-foreground: #ffffff;
+
+  /* Canvas & Surfaces */
+  --background: #f7f7f4;
+  --foreground: #11202b;
+  --surface: #ffffff;
+  --surface-low: #ebf6f8;
+  --surface-container: #e2f1f5;
+  --surface-high: #d7eaef;
+  --surface-highest: #cbe2e9;
+  --surface-media: #f0f0ec;
+
+  --card: #ffffff;
+  --card-foreground: #11202b;
+  --popover: #ffffff;
+  --popover-foreground: #11202b;
+
+  --secondary: #b13a0a;
+  --secondary-foreground: #ffffff;
+
+  --muted: #f0f0ec;
+  --muted-foreground: #5b6670;
+  --text-secondary: #5b6670;
+
+  --accent: #ebf6f8;
+  --accent-foreground: #0e5a6b;
+
+  --destructive: #ba1a1a;
+  --border: #dddcd4;
+  --input: #dddcd4;
+  --ring: #0e5a6b;
+}
+
+.dark {
+  --primary: #3b9bb0;
+  --primary-hover: #53b4c9;
+  --primary-deep: #1e6c7e;
+  --primary-light: #122930;
+  --primary-foreground: #08131a;
+
+  --cta: #d95622;
+  --cta-hover: #f06d38;
+  --cta-foreground: #ffffff;
+
+  --background: #0d171e;
+  --foreground: #f2f5f7;
+  --surface: #14222c;
+  --surface-low: #172834;
+  --surface-container: #1d3240;
+  --surface-high: #243d4d;
+  --surface-highest: #2c495c;
+  --surface-media: #1b2b36;
+
+  --card: #14222c;
+  --card-foreground: #f2f5f7;
+  --popover: #14222c;
+  --popover-foreground: #f2f5f7;
+
+  --secondary: #d95622;
+  --secondary-foreground: #ffffff;
+
+  --muted: #1b2b36;
+  --muted-foreground: #9db0be;
+  --text-secondary: #9db0be;
+
+  --accent: #172e38;
+  --accent-foreground: #7ed3e6;
+
+  --destructive: #ef4444;
+  --border: #253845;
+  --input: #253845;
+  --ring: #3b9bb0;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased overflow-x-hidden;
+    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  }
+}
+
+/* Sport-Luxe Utility Classes */
+.font-display {
+  font-family: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+}
+
+.font-label {
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+}
+
+.shadow-card {
+  box-shadow: 0 4px 20px rgba(17, 32, 43, 0.04);
+}
+
+.shadow-card-hover {
+  box-shadow: 0 12px 32px rgba(14, 90, 107, 0.09);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
