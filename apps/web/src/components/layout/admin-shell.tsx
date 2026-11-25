@@ -97,7 +97,7 @@ export function AdminShell({ children }: AdminShellProps) {
               <CheckCircle2 className="size-3.5 text-banner-warm" /> Telebirr: Active
             </span>
             <span className="hidden items-center gap-1 md:inline-flex">
-              <Wallet className="size-3.5 text-banner-warm" /> CBE Birr: Operational
+              <Wallet className="size-3.5 text-banner-warm" /> CBE: Operational
             </span>
             <Link
               href="/"

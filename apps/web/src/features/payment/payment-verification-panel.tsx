@@ -72,7 +72,11 @@ export function PaymentVerificationPanel({
 }: PaymentVerificationPanelProps) {
   const queryClient = useQueryClient();
   const addToast = useUiStore((s) => s.addToast);
-  const { data: liveStatus, refetch: refetchStatus } = usePaymentStatusQuery(orderNumber);
+  const {
+    data: liveStatus,
+    isFetching: isStatusFetching,
+    refetch: refetchStatus,
+  } = usePaymentStatusQuery(orderNumber);
 
   const effectiveStatus = liveStatus?.paymentStatus ?? initialStatus;
   const effectiveOrderStatus = liveStatus?.orderStatus ?? "PendingPayment";
@@ -325,19 +329,22 @@ export function PaymentVerificationPanel({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant={getPaymentBadgeVariant(effectiveLatestReceipt?.status ?? effectiveStatus)}>
             {effectiveLatestReceipt ? `Receipt: ${effectiveLatestReceipt.status}` : effectiveStatus}
           </Badge>
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
+            disabled={isStatusFetching}
             onClick={() => refetchStatus()}
             title="Refresh payment status"
-            className="h-8 px-2 text-xs"
+            aria-label="Refresh payment status"
+            className="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
           >
-            <RefreshCw className="size-3.5" />
+            <RefreshCw className={cn("size-3.5 shrink-0", isStatusFetching && "animate-spin")} />
+            <span>Refresh</span>
           </Button>
         </div>
       </div>

@@ -135,6 +135,7 @@ function AdminPaymentsInner() {
   const {
     data: paymentsResponse,
     isLoading: isPaymentsLoading,
+    isFetching: isPaymentsFetching,
     refetch: refetchPayments,
   } = useAdminPaymentsQuery({
     status: statusFilter || undefined,
@@ -697,8 +698,8 @@ function AdminPaymentsInner() {
       {activeTab === "queue" ? (
         <div className="space-y-4">
           {/* Filters */}
-          <div className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 shadow-card md:grid-cols-12">
-            <div className="relative md:col-span-4">
+          <div className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 shadow-card sm:grid-cols-2 xl:grid-cols-12 xl:items-center">
+            <div className="relative sm:col-span-2 xl:col-span-3">
               <Search className="pointer-events-none absolute top-3.5 left-3.5 size-4 text-muted-foreground" />
               <Input
                 value={search}
@@ -717,7 +718,7 @@ function AdminPaymentsInner() {
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="h-11 rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground md:col-span-2"
+              className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground xl:col-span-2"
             >
               {PAYMENT_STATUS_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -732,7 +733,7 @@ function AdminPaymentsInner() {
                 setProviderFilter(e.target.value);
                 setPage(1);
               }}
-              className="h-11 rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground md:col-span-2"
+              className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-xs font-bold text-foreground xl:col-span-2"
             >
               {PROVIDER_FILTER_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -749,27 +750,34 @@ function AdminPaymentsInner() {
                 setPage(1);
               }}
               aria-label="Start date"
-              className="md:col-span-2"
+              className="min-w-0 xl:col-span-2"
             />
 
-            <div className="flex items-center gap-2 md:col-span-2">
-              <Input
-                type="date"
-                value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setPage(1);
-                }}
-                aria-label="End date"
-              />
+            <Input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(1);
+              }}
+              aria-label="End date"
+              className="min-w-0 xl:col-span-2"
+            />
+
+            <div className="sm:col-span-2 xl:col-span-1">
               <Button
                 type="button"
                 variant="outline"
-                size="icon"
                 title="Refresh queue"
+                aria-label="Refresh payment verification queue"
+                disabled={isPaymentsFetching}
                 onClick={() => refetchPayments()}
+                className="h-11 w-full gap-1.5 rounded-lg px-3 text-xs font-bold xl:px-0"
               >
-                <RefreshCw className="size-4" />
+                <RefreshCw
+                  className={cn("size-4 shrink-0", isPaymentsFetching && "animate-spin")}
+                />
+                <span className="xl:sr-only">Refresh Queue</span>
               </Button>
             </div>
           </div>
