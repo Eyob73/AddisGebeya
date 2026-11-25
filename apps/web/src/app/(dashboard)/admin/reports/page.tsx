@@ -3,8 +3,14 @@
 import * as React from "react";
 import { BarChart3, Download, ShoppingBag, TrendingUp, Users, Wallet } from "lucide-react";
 import { DashboardStatCard } from "@/components/shared/dashboard-stat-card";
+import { AdminReportsSkeleton } from "@/components/shared/page-skeletons";
 import { Button } from "@/components/ui/button";
-import { useCatalogStore } from "@/stores/catalog.store";
+import { useIsMounted } from "@/hooks/use-is-mounted";
+import {
+  useAdminDashboardQuery,
+  useOrdersQuery,
+  useProductsQuery,
+} from "@/hooks/use-store-queries";
 import { useUiStore } from "@/stores/ui.store";
 import { formatETB } from "@/utils/format";
 
@@ -17,14 +23,14 @@ const MONTHLY_SERIES = [
   { month: "Nov", revenueETB: 842500, orders: 194 },
 ];
 
-const PAYMENT_SPLIT = [
+const DEFAULT_PAYMENT_SPLIT = [
   { name: "Telebirr SuperApp", pct: 48, amountETB: 404400 },
   { name: "Cash / POS on Delivery", pct: 26, amountETB: 219050 },
   { name: "CBE Birr Mobile", pct: 18, amountETB: 151650 },
   { name: "Awash / Bank Transfer", pct: 8, amountETB: 67400 },
 ];
 
-const SUBCITY_SPLIT = [
+const DEFAULT_SUBCITY_SPLIT = [
   { area: "Bole (Medhanialem / Atlas)", orders: 68, share: 35 },
   { area: "Kirkos (Kazanchis / Meskel)", orders: 41, share: 21 },
   { area: "Yeka (CMC / Megenagna)", orders: 35, share: 18 },
@@ -33,15 +39,70 @@ const SUBCITY_SPLIT = [
 ];
 
 export default function AdminReportsPage() {
-  const { products, orders } = useCatalogStore();
+  const { data: orders = [], isLoading: loadingOrders } = useOrdersQuery();
+  const { data: products = [], isLoading: loadingProducts } = useProductsQuery();
+  const { data: dashData, isLoading: loadingDash } = useAdminDashboardQuery();
   const addToast = useUiStore((s) => s.addToast);
   const [range, setRange] = React.useState<"30d" | "90d" | "6m">("6m");
+  const isMounted = useIsMounted();
+
+  const totalRevenueETB = React.useMemo(() => {
+    if (dashData?.metrics?.totalRevenueETB !== undefined) {
+      return dashData.metrics.totalRevenueETB;
+    }
+    return orders.reduce((s, o) => s + o.totalETB, 0);
+  }, [dashData, orders]);
 
   const maxRevenue = Math.max(...MONTHLY_SERIES.map((m) => m.revenueETB));
   const avgBasket =
     orders.length > 0
       ? Math.round(orders.reduce((s, o) => s + o.totalETB, 0) / orders.length)
       : 4342;
+
+  const paymentSplit = React.useMemo(() => {
+    if (orders.length === 0) return DEFAULT_PAYMENT_SPLIT;
+    const counts: Record<string, { count: number; total: number }> = {};
+    for (const o of orders) {
+      const key = o.paymentMethod || "cod";
+      if (!counts[key]) counts[key] = { count: 0, total: 0 };
+      counts[key].count += 1;
+      counts[key].total += o.totalETB;
+    }
+    const totalRev = orders.reduce((s, o) => s + o.totalETB, 0) || 1;
+    const labels: Record<string, string> = {
+      telebirr: "Telebirr SuperApp",
+      cbe_birr: "CBE Birr Mobile",
+      bank_transfer: "Awash / Bank Transfer",
+      cod: "Cash / POS on Delivery",
+    };
+    return Object.entries(counts).map(([method, data]) => ({
+      name: labels[method] ?? method,
+      pct: Math.round((data.total / totalRev) * 100),
+      amountETB: data.total,
+    }));
+  }, [orders]);
+
+  const subcitySplit = React.useMemo(() => {
+    if (dashData?.ordersBySubcity && dashData.ordersBySubcity.length > 0) {
+      const totalCount = dashData.ordersBySubcity.reduce((s, item) => s + item.count, 0) || 1;
+      return dashData.ordersBySubcity.map((item) => ({
+        area: item.subCity,
+        orders: item.count,
+        share: Math.round((item.count / totalCount) * 100),
+      }));
+    }
+    if (orders.length === 0) return DEFAULT_SUBCITY_SPLIT;
+    const counts: Record<string, number> = {};
+    for (const o of orders) {
+      const sc = o.subCity || "Addis Ababa Central";
+      counts[sc] = (counts[sc] || 0) + 1;
+    }
+    return Object.entries(counts).map(([area, cnt]) => ({
+      area,
+      orders: cnt,
+      share: Math.round((cnt / orders.length) * 100),
+    }));
+  }, [dashData, orders]);
 
   const handleExportReport = () => {
     const csv = [
@@ -57,6 +118,10 @@ export default function AdminReportsPage() {
     URL.revokeObjectURL(url);
     addToast({ title: "Sales Report Exported", description: "Downloaded Birr balance sheet CSV.", variant: "success" });
   };
+
+  if (!isMounted || loadingOrders || loadingProducts || loadingDash) {
+    return <AdminReportsSkeleton />;
+  }
 
   return (
     <div className="space-y-6">
@@ -96,8 +161,8 @@ export default function AdminReportsPage() {
       {/* KPI Row */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardStatCard
-          label="Gross Revenue (Nov)"
-          value="842,500"
+          label="Gross Revenue"
+          value={totalRevenueETB.toLocaleString("en-US")}
           unit="ETB"
           icon={Wallet}
           badge="+18.4% MoM"
@@ -178,7 +243,7 @@ export default function AdminReportsPage() {
             </p>
           </div>
           <div className="space-y-4">
-            {PAYMENT_SPLIT.map((pm) => (
+            {paymentSplit.map((pm) => (
               <div key={pm.name} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-foreground">{pm.name}</span>
@@ -244,7 +309,7 @@ export default function AdminReportsPage() {
             Top Delivery Zones
           </h2>
           <div className="space-y-3.5">
-            {SUBCITY_SPLIT.map((zone) => (
+            {subcitySplit.map((zone) => (
               <div key={zone.area} className="space-y-1">
                 <div className="flex justify-between text-xs">
                   <span className="font-semibold text-foreground">{zone.area}</span>

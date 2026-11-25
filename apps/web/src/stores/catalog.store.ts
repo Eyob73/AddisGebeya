@@ -1,14 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import {
-  COMMUNITY_REVIEWS,
-  INITIAL_CATEGORIES,
-  INITIAL_CUSTOMERS,
-  INITIAL_ORDERS,
-  INITIAL_PAYMENT_SLIPS,
-  INITIAL_PRODUCTS,
-  INITIAL_STORE_SETTINGS,
-} from "@/data/mock-footwear";
+import { apiClient } from "@/lib/api-client";
 import type {
   CustomerRecord,
   OrderRecord,
@@ -21,6 +12,37 @@ import type {
   StoreSettings,
 } from "@/types/store.types";
 
+export const DEFAULT_STORE_SETTINGS: StoreSettings = {
+  storeName: "AddisGebeya Shoes",
+  tagline: "Authentic Footwear Vault Addis Ababa",
+  showroomAddress: "Bole, Addis Ababa, Ethiopia",
+  phone: "+251 911 234 567",
+  whatsapp: "+251 911 234 567",
+  telegramHandle: "@AddisGebeyaHQ",
+  email: "contact@addisgebeyashoes.et",
+  showroomHours: "Mon - Sat: 8:30 AM - 8:00 PM | Sun: 10:00 AM - 6:00 PM",
+  freeDeliveryThresholdETB: 0,
+  standardAddisDeliveryFeeETB: 0,
+  vipTwoHourDeliveryFeeETB: 450,
+  regionalCargoFeeETB: 600,
+  vatPercent: 15,
+  paymentMethods: {
+    telebirr: true,
+    cbeBirr: true,
+    bankTransfer: true,
+    cod: true,
+  },
+  announcementBarText:
+    "🎉 Free Addis Ababa Delivery on All Orders • 15% off performance marathon runners with code ADDISRUN",
+  dispatchRibbonText: "Addis Ababa Central Hub Active • Live Rider Dispatch",
+  heroImageUrl: null,
+  heroBadgeText: "Addis Stock Ready",
+  heroCardSubtitle: "New Arrival • Track Spec",
+  heroCardTitle: "Addis Velocity Pro Nitro",
+  heroCardPriceText: "5,850 ETB",
+  heroCardHref: "/products/addis-velocity-pro-nitro",
+};
+
 interface CatalogState {
   products: ShoeProduct[];
   categories: ShoeCategory[];
@@ -29,250 +51,268 @@ interface CatalogState {
   reviews: ShoeReview[];
   paymentSlips: PaymentSlipRecord[];
   settings: StoreSettings;
+  isSyncing: boolean;
+  isInitialized: boolean;
+
+  // Backend Sync
+  syncFromBackend: () => Promise<void>;
 
   // Product actions
-  addProduct: (product: ShoeProduct) => void;
-  updateProduct: (id: string, patch: Partial<ShoeProduct>) => void;
-  deleteProduct: (id: string) => void;
+  addProduct: (product: ShoeProduct) => Promise<void>;
+  updateProduct: (id: string, patch: Partial<ShoeProduct>) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
 
-  // Inventory actions (size-specific & color-specific)
-  updateSizeStock: (productId: string, colorwayId: string, size: number, quantity: number) => void;
-  bulkRestockProduct: (productId: string, colorwayId: string, stockBySize: Record<number, number>) => void;
+  // Inventory actions
+  updateSizeStock: (productId: string, colorwayId: string, size: number, quantity: number) => Promise<void>;
+  bulkRestockProduct: (
+    productId: string,
+    colorwayId: string,
+    stockBySize: Record<number, number>,
+  ) => Promise<void>;
   decrementStockForOrder: (
     items: Array<{ productId: string; colorwayId: string; size: number; quantity: number }>,
   ) => void;
 
   // Category actions
-  addCategory: (category: ShoeCategory) => void;
-  updateCategory: (id: string, patch: Partial<ShoeCategory>) => void;
-  deleteCategory: (id: string) => void;
+  addCategory: (category: ShoeCategory) => Promise<void>;
+  updateCategory: (id: string, patch: Partial<ShoeCategory>) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
 
   // Order actions
   createOrder: (order: OrderRecord) => void;
-  updateOrderStatus: (orderId: string, status: OrderStatus, courierName?: string) => void;
-  verifyOrderPayment: (orderId: string, reference: string, paymentStatus?: PaymentStatus) => void;
-  attachSlipToOrder: (slipId: string, orderId: string) => void;
+  updateOrderStatus: (orderId: string, status: OrderStatus, courierName?: string) => Promise<void>;
+  verifyOrderPayment: (orderId: string, reference: string, paymentStatus?: PaymentStatus) => Promise<void>;
+  attachSlipToOrder: (slipId: string, orderId: string) => Promise<void>;
 
   // Review actions
-  addReview: (review: ShoeReview) => void;
-  markReviewHelpful: (reviewId: string) => void;
+  addReview: (review: ShoeReview) => Promise<void>;
+  markReviewHelpful: (reviewId: string) => Promise<void>;
 
   // Settings actions
-  updateSettings: (patch: Partial<StoreSettings>) => void;
+  updateSettings: (patch: Partial<StoreSettings>) => Promise<void>;
 }
 
-export const useCatalogStore = create<CatalogState>()(
-  persist(
-    (set, get) => ({
-      products: INITIAL_PRODUCTS,
-      categories: INITIAL_CATEGORIES,
-      orders: INITIAL_ORDERS,
-      customers: INITIAL_CUSTOMERS,
-      reviews: COMMUNITY_REVIEWS,
-      paymentSlips: INITIAL_PAYMENT_SLIPS,
-      settings: INITIAL_STORE_SETTINGS,
+export const useCatalogStore = create<CatalogState>()((set, get) => ({
+  products: [],
+  categories: [],
+  orders: [],
+  customers: [],
+  reviews: [],
+  paymentSlips: [],
+  settings: DEFAULT_STORE_SETTINGS,
+  isSyncing: false,
+  isInitialized: false,
 
-      addProduct: (product) => set({ products: [product, ...get().products] }),
+  syncFromBackend: async () => {
+    if (get().isSyncing) return;
+    set({ isSyncing: true });
+    try {
+      const [products, categories, orders, settings, slips, customers, reviews] =
+        await Promise.allSettled([
+          apiClient.get<ShoeProduct[]>("/products"),
+          apiClient.get<ShoeCategory[]>("/categories"),
+          apiClient.get<OrderRecord[]>("/orders"),
+          apiClient.get<StoreSettings>("/settings"),
+          apiClient.get<PaymentSlipRecord[]>("/payments/slips"),
+          apiClient.get<CustomerRecord[]>("/admin/customers"),
+          apiClient.get<ShoeReview[]>("/reviews"),
+        ]);
 
-      updateProduct: (id, patch) =>
-        set({
-          products: get().products.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-        }),
+      set({
+        products: products.status === "fulfilled" ? products.value : get().products,
+        categories: categories.status === "fulfilled" ? categories.value : get().categories,
+        orders: orders.status === "fulfilled" ? orders.value : get().orders,
+        settings: settings.status === "fulfilled" ? settings.value : get().settings,
+        paymentSlips: slips.status === "fulfilled" ? slips.value : get().paymentSlips,
+        customers: customers.status === "fulfilled" ? customers.value : get().customers,
+        reviews: reviews.status === "fulfilled" ? reviews.value : get().reviews,
+        isInitialized: true,
+      });
+    } catch {
+      // Retain existing in-memory state on transient errors
+    } finally {
+      set({ isSyncing: false });
+    }
+  },
 
-      deleteProduct: (id) =>
-        set({
-          products: get().products.filter((p) => p.id !== id),
-        }),
+  addProduct: async (product) => {
+    set({ products: [product, ...get().products.filter((p) => p.id !== product.id)] });
+  },
 
-      updateSizeStock: (productId, colorwayId, size, quantity) =>
-        set({
-          products: get().products.map((product) => {
-            if (product.id !== productId) return product;
+  updateProduct: async (id, patch) => {
+    set({
+      products: get().products.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    });
+  },
+
+  deleteProduct: async (id) => {
+    set({
+      products: get().products.filter((p) => p.id !== id),
+    });
+  },
+
+  updateSizeStock: async (productId, colorwayId, size, quantity) => {
+    set({
+      products: get().products.map((product) => {
+        if (product.id !== productId) return product;
+        return {
+          ...product,
+          colorways: product.colorways.map((cw) => {
+            if (cw.id !== colorwayId) return cw;
             return {
-              ...product,
-              colorways: product.colorways.map((cw) => {
-                if (cw.id !== colorwayId) return cw;
-                return {
-                  ...cw,
-                  stockBySize: {
-                    ...cw.stockBySize,
-                    [size]: Math.max(0, Math.floor(quantity)),
-                  },
-                };
-              }),
-            };
-          }),
-        }),
-
-      bulkRestockProduct: (productId, colorwayId, stockBySize) =>
-        set({
-          products: get().products.map((product) => {
-            if (product.id !== productId) return product;
-            return {
-              ...product,
-              colorways: product.colorways.map((cw) =>
-                cw.id === colorwayId ? { ...cw, stockBySize: { ...stockBySize } } : cw,
-              ),
-            };
-          }),
-        }),
-
-      decrementStockForOrder: (orderItems) =>
-        set({
-          products: get().products.map((product) => {
-            const matching = orderItems.filter((i) => i.productId === product.id);
-            if (matching.length === 0) return product;
-            return {
-              ...product,
-              colorways: product.colorways.map((cw) => {
-                const cwMatches = matching.filter((m) => m.colorwayId === cw.id);
-                if (cwMatches.length === 0) return cw;
-                const nextStock = { ...cw.stockBySize };
-                for (const m of cwMatches) {
-                  nextStock[m.size] = Math.max(0, (nextStock[m.size] ?? 0) - m.quantity);
-                }
-                return { ...cw, stockBySize: nextStock };
-              }),
-            };
-          }),
-        }),
-
-      addCategory: (category) => set({ categories: [...get().categories, category] }),
-
-      updateCategory: (id, patch) =>
-        set({
-          categories: get().categories.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-        }),
-
-      deleteCategory: (id) =>
-        set({
-          categories: get().categories.filter((c) => c.id !== id),
-        }),
-
-      createOrder: (order) => {
-        const existingCustomer = get().customers.find(
-          (c) => c.email.toLowerCase() === order.customerEmail.toLowerCase(),
-        );
-        const updatedCustomers = existingCustomer
-          ? get().customers.map((c) =>
-              c.id === existingCustomer.id
-                ? {
-                    ...c,
-                    totalOrders: c.totalOrders + 1,
-                    totalSpentETB: c.totalSpentETB + order.totalETB,
-                    tier:
-                      c.totalOrders + 1 >= 4
-                        ? ("VIP Runner" as const)
-                        : ("Repeat Buyer" as const),
-                  }
-                : c,
-            )
-          : [
-              {
-                id: order.customerId,
-                name: order.customerName,
-                email: order.customerEmail,
-                phone: order.customerPhone,
-                city: order.city,
-                subCity: order.subCity,
-                preferredSize: order.items[0]?.size || 42,
-                totalOrders: 1,
-                totalSpentETB: order.totalETB,
-                tier: "Member" as const,
-                joinedAt: order.createdAt,
+              ...cw,
+              stockBySize: {
+                ...cw.stockBySize,
+                [size]: Math.max(0, Math.floor(quantity)),
               },
-              ...get().customers,
-            ];
-
-        set({
-          orders: [order, ...get().orders],
-          customers: updatedCustomers,
-        });
-      },
-
-      updateOrderStatus: (orderId, status, courierName) =>
-        set({
-          orders: get().orders.map((order) => {
-            if (order.id !== orderId) return order;
-            const statusLabels: Record<OrderStatus, string> = {
-              pending: "Order Pending Confirmation",
-              confirmed: "Order Confirmed by Bole HQ",
-              packed: "Packed & Quality Checked",
-              out_for_delivery: courierName
-                ? `Out with ${courierName}`
-                : "Out with Addis Ababa Courier",
-              shipped_regional: "Shipped via Regional Express Cargo",
-              delivered: "Delivered & Fit Verified",
-              cancelled: "Order Cancelled",
-            };
-            const nowLabel = new Date().toLocaleTimeString("en-US", {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            const nextEvents = [
-              ...order.trackingEvents.map((ev) => ({ ...ev, current: false })),
-              {
-                step: statusLabels[status],
-                description: `Status updated by Store Owner Console at ${nowLabel}.`,
-                timestamp: `Today, ${nowLabel}`,
-                completed: true,
-                current: true,
-              },
-            ];
-            return {
-              ...order,
-              status,
-              courierName: courierName ?? order.courierName,
-              trackingEvents: nextEvents,
             };
           }),
-        }),
+        };
+      }),
+    });
 
-      verifyOrderPayment: (orderId, reference, paymentStatus = "verified") =>
-        set({
-          orders: get().orders.map((o) =>
-            o.id === orderId ? { ...o, paymentReference: reference, paymentStatus } : o,
+    await apiClient
+      .patch(`/products/${productId}/stock`, {
+        colorwayId,
+        size,
+        quantity,
+      })
+      .catch(() => { });
+  },
+
+  bulkRestockProduct: async (productId, colorwayId, stockBySize) => {
+    set({
+      products: get().products.map((product) => {
+        if (product.id !== productId) return product;
+        return {
+          ...product,
+          colorways: product.colorways.map((cw) =>
+            cw.id === colorwayId ? { ...cw, stockBySize: { ...stockBySize } } : cw,
           ),
-        }),
+        };
+      }),
+    });
 
-      attachSlipToOrder: (slipId, orderId) => {
-        const slip = get().paymentSlips.find((s) => s.id === slipId);
-        if (!slip) return;
-        set({
-          paymentSlips: get().paymentSlips.filter((s) => s.id !== slipId),
-          orders: get().orders.map((o) =>
-            o.id === orderId
-              ? { ...o, paymentStatus: "verified", paymentReference: slip.reference }
-              : o,
-          ),
-        });
-      },
+    await apiClient
+      .post(`/products/${productId}/restock`, {
+        colorwayId,
+        stockBySize,
+      })
+      .catch(() => { });
+  },
 
-      addReview: (review) =>
-        set({
-          reviews: [review, ...get().reviews],
-          products: get().products.map((p) => {
-            if (p.id !== review.productId) return p;
-            const nextCount = p.reviewCount + 1;
-            const nextRating = Number(
-              ((p.rating * p.reviewCount + review.rating) / nextCount).toFixed(1),
-            );
-            return { ...p, reviewCount: nextCount, rating: nextRating };
+  decrementStockForOrder: (orderItems) =>
+    set({
+      products: get().products.map((product) => {
+        const matching = orderItems.filter((i) => i.productId === product.id);
+        if (matching.length === 0) return product;
+        return {
+          ...product,
+          colorways: product.colorways.map((cw) => {
+            const cwMatches = matching.filter((m) => m.colorwayId === cw.id);
+            if (cwMatches.length === 0) return cw;
+            const nextStock = { ...cw.stockBySize };
+            for (const m of cwMatches) {
+              nextStock[m.size] = Math.max(0, (nextStock[m.size] ?? 0) - m.quantity);
+            }
+            return { ...cw, stockBySize: nextStock };
           }),
-        }),
-
-      markReviewHelpful: (reviewId) =>
-        set({
-          reviews: get().reviews.map((r) =>
-            r.id === reviewId ? { ...r, helpfulCount: r.helpfulCount + 1 } : r,
-          ),
-        }),
-
-      updateSettings: (patch) => set({ settings: { ...get().settings, ...patch } }),
+        };
+      }),
     }),
-    {
-      name: "addisgebeya-catalog-v1",
-    },
-  ),
-);
 
+  addCategory: async (category) => {
+    set({ categories: [...get().categories, category] });
+    await apiClient.post("/categories", category).catch(() => { });
+  },
+
+  updateCategory: async (id, patch) => {
+    set({
+      categories: get().categories.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+    });
+    await apiClient.patch(`/categories/${id}`, patch).catch(() => { });
+  },
+
+  deleteCategory: async (id) => {
+    set({
+      categories: get().categories.filter((c) => c.id !== id),
+    });
+    await apiClient.delete(`/categories/${id}`).catch(() => { });
+  },
+
+  createOrder: (order) => {
+    set({
+      orders: [order, ...get().orders],
+    });
+  },
+
+  updateOrderStatus: async (orderId, status, courierName) => {
+    set({
+      orders: get().orders.map((o) =>
+        o.id === orderId
+          ? {
+            ...o,
+            status,
+            courierName: courierName ?? o.courierName,
+          }
+          : o,
+      ),
+    });
+    await apiClient
+      .patch(`/orders/${orderId}/status`, {
+        status,
+        courierName,
+      })
+      .catch(() => { });
+  },
+
+  verifyOrderPayment: async (orderId, reference, paymentStatus = "verified") => {
+    set({
+      orders: get().orders.map((o) =>
+        o.id === orderId
+          ? {
+            ...o,
+            paymentStatus,
+            paymentReference: reference,
+          }
+          : o,
+      ),
+    });
+    await apiClient
+      .patch(`/orders/${orderId}/verify-payment`, {
+        reference,
+        paymentStatus,
+      })
+      .catch(() => { });
+  },
+
+  attachSlipToOrder: async (slipId, orderId) => {
+    set({
+      paymentSlips: get().paymentSlips.map((s) =>
+        s.id === slipId ? { ...s, matchedOrderId: orderId } : s,
+      ),
+    });
+    await apiClient.post("/payments/slips/attach", { slipId, orderId }).catch(() => { });
+  },
+
+  addReview: async (review) => {
+    set({ reviews: [review, ...get().reviews] });
+    await apiClient.post("/reviews", review).catch(() => { });
+  },
+
+  markReviewHelpful: async (reviewId) => {
+    set({
+      reviews: get().reviews.map((r) =>
+        r.id === reviewId ? { ...r, helpfulCount: r.helpfulCount + 1 } : r,
+      ),
+    });
+    await apiClient.post(`/reviews/${reviewId}/helpful`).catch(() => { });
+  },
+
+  updateSettings: async (patch) => {
+    set({
+      settings: { ...get().settings, ...patch },
+    });
+    await apiClient.patch("/settings", patch).catch(() => { });
+  },
+}));

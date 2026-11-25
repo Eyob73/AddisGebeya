@@ -18,7 +18,12 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-cta: var(--cta);
   --color-cta-hover: var(--cta-hover);
+  --color-cta-light: var(--cta-light);
+  --color-cta-text: var(--cta-text);
   --color-cta-foreground: var(--cta-foreground);
+  --color-banner-accent: var(--banner-accent);
+  --color-banner-warm: var(--banner-warm);
+  --color-banner-muted: var(--banner-muted);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -30,7 +35,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Stitch Surface & Container Tokens */
+  /* Surface & Container Tokens */
   --color-surface: var(--surface);
   --color-surface-low: var(--surface-low);
   --color-surface-container: var(--surface-container);
@@ -55,87 +60,107 @@
 :root {
   --radius: 0.5rem;
 
-  /* Brand Palette: AddisGebeya Shoes */
-  --primary: #0e5a6b;
-  --primary-hover: #0a4654;
-  --primary-deep: #00414f;
-  --primary-light: #ebf6f8;
+  /* Brand Palette: Modern Midnight Cobalt & Terracotta Coral */
+  --primary: #14284b;
+  --primary-hover: #0d1d38;
+  --primary-deep: #0a1529;
+  --primary-light: #edf2f8;
   --primary-foreground: #ffffff;
 
-  --cta: #b13a0a;
-  --cta-hover: #8e2e08;
+  --cta: #d4441a;
+  --cta-hover: #b53510;
+  --cta-light: #fff0eb;
+  --cta-text: #a92e0b;
   --cta-foreground: #ffffff;
 
-  /* Canvas & Surfaces */
-  --background: #f7f7f4;
-  --foreground: #11202b;
+  --banner-accent: #93c5fd;
+  --banner-warm: #fed7aa;
+  --banner-muted: #e2e8f0;
+
+  /* Clean Neutral Canvas & Layered Surfaces */
+  --background: #f8f9fb;
+  --foreground: #0f172a;
   --surface: #ffffff;
-  --surface-low: #ebf6f8;
-  --surface-container: #e2f1f5;
-  --surface-high: #d7eaef;
-  --surface-highest: #cbe2e9;
-  --surface-media: #f0f0ec;
+  --surface-low: #f1f4f8;
+  --surface-container: #e6ebf2;
+  --surface-high: #dbe2ec;
+  --surface-highest: #cfd8e5;
+  --surface-media: #f3f5f8;
 
   --card: #ffffff;
-  --card-foreground: #11202b;
+  --card-foreground: #0f172a;
   --popover: #ffffff;
-  --popover-foreground: #11202b;
+  --popover-foreground: #0f172a;
 
-  --secondary: #b13a0a;
+  --secondary: #d4441a;
   --secondary-foreground: #ffffff;
 
-  --muted: #f0f0ec;
-  --muted-foreground: #5b6670;
-  --text-secondary: #5b6670;
+  --muted: #f1f4f8;
+  --muted-foreground: #475569;
+  --text-secondary: #475569;
 
-  --accent: #ebf6f8;
-  --accent-foreground: #0e5a6b;
+  --accent: #edf2f8;
+  --accent-foreground: #14284b;
 
-  --destructive: #ba1a1a;
-  --border: #dddcd4;
-  --input: #dddcd4;
-  --ring: #0e5a6b;
+  --destructive: #dc2626;
+  --border: #e2e8f0;
+  --input: #cbd5e1;
+  --ring: #14284b;
+
+  /* Modern Skeleton Tokens */
+  --skeleton-base: #e7ebf0;
+  --skeleton-highlight: rgba(255, 255, 255, 0.75);
 }
 
 .dark {
-  --primary: #3b9bb0;
-  --primary-hover: #53b4c9;
-  --primary-deep: #1e6c7e;
-  --primary-light: #122930;
-  --primary-foreground: #08131a;
+  --primary: #5b9bf0;
+  --primary-hover: #76acfa;
+  --primary-deep: #0f2038;
+  --primary-light: #17253b;
+  --primary-foreground: #08121e;
 
-  --cta: #d95622;
-  --cta-hover: #f06d38;
+  --cta: #e65428;
+  --cta-hover: #f46b40;
+  --cta-light: #2e1811;
+  --cta-text: #ff9d7d;
   --cta-foreground: #ffffff;
 
-  --background: #0d171e;
-  --foreground: #f2f5f7;
-  --surface: #14222c;
-  --surface-low: #172834;
-  --surface-container: #1d3240;
-  --surface-high: #243d4d;
-  --surface-highest: #2c495c;
-  --surface-media: #1b2b36;
+  --banner-accent: #93c5fd;
+  --banner-warm: #fed7aa;
+  --banner-muted: #e2e8f0;
 
-  --card: #14222c;
-  --card-foreground: #f2f5f7;
-  --popover: #14222c;
-  --popover-foreground: #f2f5f7;
+  --background: #0b111a;
+  --foreground: #f8fafc;
+  --surface: #121b27;
+  --surface-low: #182332;
+  --surface-container: #202e42;
+  --surface-high: #283952;
+  --surface-highest: #314563;
+  --surface-media: #1a2535;
 
-  --secondary: #d95622;
+  --card: #121b27;
+  --card-foreground: #f8fafc;
+  --popover: #121b27;
+  --popover-foreground: #f8fafc;
+
+  --secondary: #e65428;
   --secondary-foreground: #ffffff;
 
-  --muted: #1b2b36;
-  --muted-foreground: #9db0be;
-  --text-secondary: #9db0be;
+  --muted: #182332;
+  --muted-foreground: #94a3b8;
+  --text-secondary: #94a3b8;
 
-  --accent: #172e38;
-  --accent-foreground: #7ed3e6;
+  --accent: #17253b;
+  --accent-foreground: #93c5fd;
 
   --destructive: #ef4444;
-  --border: #253845;
-  --input: #253845;
-  --ring: #3b9bb0;
+  --border: #243347;
+  --input: #243347;
+  --ring: #5b9bf0;
+
+  /* Modern Skeleton Tokens */
+  --skeleton-base: #1e293b;
+  --skeleton-highlight: rgba(255, 255, 255, 0.08);
 }
 
 @layer base {
@@ -172,11 +197,11 @@
 }
 
 .shadow-card {
-  box-shadow: 0 4px 20px rgba(17, 32, 43, 0.04);
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
 }
 
 .shadow-card-hover {
-  box-shadow: 0 12px 32px rgba(14, 90, 107, 0.09);
+  box-shadow: 0 14px 32px rgba(20, 40, 75, 0.1);
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -186,4 +211,49 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Modern Skeleton Shimmer Animation */
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--skeleton-base, #e7ebf0);
+}
+
+.skeleton-shimmer::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--skeleton-highlight, rgba(255, 255, 255, 0.75)) 50%,
+    transparent 100%
+  );
+  animation: skeleton-shimmer 1.8s infinite ease-in-out;
+  content: "";
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after {
+    animation: none;
+    display: none;
+  }
+  .skeleton-shimmer {
+    animation: none;
+    opacity: 0.85;
+  }
 }

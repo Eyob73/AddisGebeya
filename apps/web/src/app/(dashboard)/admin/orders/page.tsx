@@ -1,35 +1,53 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Eye, Search, Truck } from "lucide-react";
+import Link from "next/link";
+import { CheckCircle2, Eye, Search, ShieldCheck, Truck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { ModalDialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { useCatalogStore } from "@/stores/catalog.store";
+import { AdminTablePageSkeleton } from "@/components/shared/page-skeletons";
+import { OpenOfficialReceiptButton } from "@/components/shared/open-official-receipt-button";
+import { OpenReceiptButton } from "@/components/shared/open-receipt-button";
+import {
+  getPaymentBadgeVariant,
+  isPaymentSettledStatus,
+} from "@/features/payment/payment-verification-panel";
+import { getReceiptBadgeVariant } from "@/features/payment/payment-receipt-submission";
+import { useIsMounted } from "@/hooks/use-is-mounted";
+import { useOrdersQuery } from "@/hooks/use-store-queries";
+import { storeService } from "@/services/store.service";
 import { useUiStore } from "@/stores/ui.store";
 import type { OrderRecord, OrderStatus } from "@/types/store.types";
 import { formatDateShort, formatETB } from "@/utils/format";
 
 const ORDER_STATUSES: Array<{ value: OrderStatus; label: string }> = [
-  { value: "pending", label: "Pending" },
-  { value: "confirmed", label: "Confirmed" },
-  { value: "packed", label: "Packed" },
+  { value: "PendingPayment", label: "Pending Payment" },
+  { value: "Confirmed", label: "Confirmed" },
+  { value: "Processing", label: "Processing" },
+  { value: "Shipped", label: "Shipped" },
+  { value: "Delivered", label: "Delivered" },
+  { value: "Cancelled", label: "Cancelled" },
+  { value: "pending", label: "Pending (Legacy)" },
+  { value: "confirmed", label: "Confirmed (Legacy)" },
+  { value: "packed", label: "Packed (Legacy)" },
   { value: "out_for_delivery", label: "Out with Courier" },
   { value: "shipped_regional", label: "Shipped Regional" },
-  { value: "delivered", label: "Delivered" },
-  { value: "cancelled", label: "Cancelled" },
+  { value: "delivered", label: "Delivered (Legacy)" },
+  { value: "cancelled", label: "Cancelled (Legacy)" },
 ];
 
 export default function AdminOrdersPage() {
-  const { orders, updateOrderStatus, verifyOrderPayment } = useCatalogStore();
+  const { data: orders = [], isLoading, refetch } = useOrdersQuery();
   const addToast = useUiStore((s) => s.addToast);
 
   const [query, setQuery] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [selectedOrder, setSelectedOrder] = React.useState<OrderRecord | null>(null);
   const [refInput, setRefInput] = React.useState("");
+  const isMounted = useIsMounted();
 
   const filteredOrders = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -92,11 +110,18 @@ export default function AdminOrdersPage() {
       render: (o) => (
         <div className="space-y-1">
           <span className="block font-label text-xs font-bold uppercase text-foreground">
-            {o.paymentMethod.replace("_", " ")}
+            {o.paymentMethod.replace(/_/g, " ")}
           </span>
-          <Badge variant={o.paymentStatus === "verified" ? "success" : "warning"}>
-            {o.paymentStatus.replace("_", " ")}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-1">
+            <Badge variant={getPaymentBadgeVariant(o.paymentStatus)}>
+              {o.paymentStatus.replace(/_/g, " ")}
+            </Badge>
+            {o.receiptStatus ? (
+              <Badge variant={getReceiptBadgeVariant(o.receiptStatus)} className="text-[10px]">
+                Receipt: {o.receiptStatus}
+              </Badge>
+            ) : null}
+          </div>
         </div>
       ),
     },
@@ -114,18 +139,32 @@ export default function AdminOrdersPage() {
       render: (o) => (
         <select
           value={o.status}
-          onChange={(e) => {
+          onChange={async (e) => {
             const nextStatus = e.target.value as OrderStatus;
-            updateOrderStatus(
-              o.id,
-              nextStatus,
-              nextStatus === "out_for_delivery" ? "Courier Henok (Bike #04)" : o.courierName,
-            );
-            addToast({
-              title: `Order #${o.id} Updated`,
-              description: `Status changed to ${nextStatus.replace(/_/g, " ")}.`,
-              variant: "success",
-            });
+            try {
+              await storeService.updateOrderStatus(
+                o.id,
+                nextStatus,
+                nextStatus === "out_for_delivery" || nextStatus === "Shipped"
+                  ? "Courier Henok (Bike #04)"
+                  : o.courierName,
+              );
+              refetch();
+              addToast({
+                title: `Order #${o.id} Updated`,
+                description: `Status changed to ${nextStatus.replace(/_/g, " ")}.`,
+                variant: "success",
+              });
+            } catch (err) {
+              addToast({
+                title: "Status Update Blocked",
+                description:
+                  err instanceof Error
+                    ? err.message
+                    : "Unpaid orders cannot be advanced until payment is verified.",
+                variant: "error",
+              });
+            }
           }}
           className="h-9 rounded-lg border border-border bg-surface-low px-2.5 font-label text-xs font-bold text-foreground focus:border-primary focus:outline-none cursor-pointer"
         >
@@ -157,6 +196,10 @@ export default function AdminOrdersPage() {
     },
   ];
 
+  if (!isMounted || isLoading) {
+    return <AdminTablePageSkeleton title="Orders" hasCreateButton={false} />;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
@@ -168,7 +211,14 @@ export default function AdminOrdersPage() {
             Update fulfillment statuses, assign Addis couriers, and verify Telebirr / CBE transfers.
           </p>
         </div>
-        <Badge variant="cta">{orders.length} Total Orders</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/admin/payments">
+              <ShieldCheck className="size-4" /> Payment Verification
+            </Link>
+          </Button>
+          <Badge variant="cta">{orders.length} Total Orders</Badge>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-card sm:flex-row">
@@ -200,6 +250,7 @@ export default function AdminOrdersPage() {
         data={filteredOrders}
         rowKey={(o) => o.id}
         emptyMessage="No orders match your filter."
+        isLoading={!isMounted}
       />
 
       <ModalDialog
@@ -247,45 +298,145 @@ export default function AdminOrdersPage() {
             </div>
 
             {/* Verify Payment Reference */}
-            <div className="space-y-2 rounded-xl bg-surface-container/60 p-4">
-              <label className="block font-label text-xs font-bold text-primary">
-                Telebirr / CBE / Bank Verification Reference
-              </label>
-              <div className="flex gap-2">
-                <Input
-                  value={refInput}
-                  onChange={(e) => setRefInput(e.target.value)}
-                  placeholder="Enter TX reference (e.g. TLB9082...)"
-                />
-                <Button
-                  type="button"
-                  onClick={() => {
-                    verifyOrderPayment(selectedOrder.id, refInput || "MANUAL-VERIFIED", "verified");
-                    addToast({
-                      title: "Payment Marked Verified",
-                      description: `Order #${selectedOrder.id} payment confirmed.`,
-                      variant: "success",
-                    });
-                    setSelectedOrder(null);
-                  }}
-                >
-                  <CheckCircle2 className="size-4" /> Mark Paid
-                </Button>
+            <div className="space-y-3 rounded-xl bg-surface-container/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="block font-label text-xs font-bold text-primary">
+                  Telebirr / CBE / Bank Verification Reference
+                </label>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {selectedOrder.receiptStatus ? (
+                    <Badge variant={getReceiptBadgeVariant(selectedOrder.receiptStatus)}>
+                      Receipt: {selectedOrder.receiptStatus}
+                    </Badge>
+                  ) : null}
+                  <Badge variant={getPaymentBadgeVariant(selectedOrder.paymentStatus)}>
+                    {selectedOrder.paymentStatus.replace(/_/g, " ")}
+                  </Badge>
+                </div>
               </div>
+              {selectedOrder.latestReceiptId ||
+              selectedOrder.officialReceiptUrl ||
+              selectedOrder.paymentReference ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-foreground">
+                      {selectedOrder.paymentMethod.toUpperCase()} Receipt Verification Links
+                    </p>
+                    <p className="text-muted-foreground">
+                      Open the official provider receipt page or inspect the uploaded customer file.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <OpenOfficialReceiptButton
+                      provider={selectedOrder.paymentMethod}
+                      officialReceiptUrl={selectedOrder.officialReceiptUrl}
+                      cbeReceiptToken={selectedOrder.cbeReceiptToken}
+                      transactionReference={selectedOrder.paymentReference}
+                      reason={selectedOrder.officialReceiptReason}
+                      label="Open Official Receipt"
+                      variant="cta"
+                      size="sm"
+                    />
+                    {selectedOrder.latestReceiptId ? (
+                      <OpenReceiptButton
+                        receiptId={selectedOrder.latestReceiptId}
+                        label="View Uploaded Receipt"
+                        variant="outline"
+                        size="sm"
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+              {isPaymentSettledStatus(selectedOrder.paymentStatus) ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>
+                    Verified Reference:{" "}
+                    <strong className="font-mono text-foreground">
+                      {selectedOrder.paymentReference || "Verified"}
+                    </strong>
+                  </span>
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/admin/payments?search=${encodeURIComponent(selectedOrder.id)}`}>
+                      <ShieldCheck className="size-3.5" /> View Audit Log
+                    </Link>
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Input
+                      value={refInput}
+                      onChange={(e) => setRefInput(e.target.value)}
+                      placeholder="Enter TX reference (e.g. FT2611...)"
+                    />
+                    <Button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await storeService.verifyOrderPayment(
+                            selectedOrder.id,
+                            refInput || "MANUAL-VERIFIED",
+                            "Paid",
+                          );
+                          refetch();
+                          addToast({
+                            title: "Payment Marked Verified",
+                            description: `Order #${selectedOrder.id} payment confirmed.`,
+                            variant: "success",
+                          });
+                          setSelectedOrder(null);
+                        } catch (err) {
+                          addToast({
+                            title: "Verification Update Failed",
+                            description:
+                              err instanceof Error ? err.message : "Could not verify payment.",
+                            variant: "error",
+                          });
+                        }
+                      }}
+                    >
+                      <CheckCircle2 className="size-4" /> Mark Paid
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Need to inspect payment verification logs or leave an audit reason?{" "}
+                    <Link
+                      href={`/admin/payments?search=${encodeURIComponent(selectedOrder.id)}`}
+                      className="font-semibold text-primary underline"
+                    >
+                      Open Payment Verification Console
+                    </Link>
+                    .
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => {
-                  updateOrderStatus(
-                    selectedOrder.id,
-                    "out_for_delivery",
-                    "Courier Henok (Bike #04)",
-                  );
-                  addToast({ title: "Dispatched with Courier Henok", variant: "success" });
-                  setSelectedOrder(null);
+                onClick={async () => {
+                  try {
+                    await storeService.updateOrderStatus(
+                      selectedOrder.id,
+                      "Shipped",
+                      "Courier Henok (Bike #04)",
+                    );
+                    refetch();
+                    addToast({ title: "Dispatched with Courier Henok", variant: "success" });
+                    setSelectedOrder(null);
+                  } catch (err) {
+                    addToast({
+                      title: "Dispatch Blocked",
+                      description:
+                        err instanceof Error
+                          ? err.message
+                          : "Verify payment before dispatching this order.",
+                      variant: "error",
+                    });
+                  }
                 }}
               >
                 <Truck className="size-4" /> Dispatch Courier

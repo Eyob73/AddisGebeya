@@ -134,11 +134,6 @@ export function SiteFooter() {
                   Contact &amp; Showroom
                 </Link>
               </li>
-              <li>
-                <Link href="/admin" className="font-semibold text-primary hover:underline">
-                  Store Owner Dashboard
-                </Link>
-              </li>
             </ul>
           </div>
 

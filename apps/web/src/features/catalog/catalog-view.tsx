@@ -22,16 +22,18 @@ import {
 import { ProductGrid } from "@/components/shared/product-grid";
 import { SizeGuideModal } from "@/components/shared/size-guide-modal";
 import { Button } from "@/components/ui/button";
+import { SkeletonBase } from "@/components/ui/skeleton";
 import { EU_SIZES } from "@/data/mock-footwear";
 import { useCategoriesQuery, useProductsQuery } from "@/hooks/use-store-queries";
 import type { ProductQueryFilters } from "@/services/store.service";
 import { useCatalogStore } from "@/stores/catalog.store";
 import { useUiStore } from "@/stores/ui.store";
+import { SHOE_GENDERS, SHOE_TYPES } from "@/types/store.types";
 import { cn } from "@/lib/utils";
 
 const COLOR_TONES = [
-  { label: "Deep Teal", hex: "#0E5A6B" },
-  { label: "Amber", hex: "#B13A0A" },
+  { label: "Midnight Navy", hex: "#14284B" },
+  { label: "Coral Red", hex: "#D4441A" },
   { label: "Obsidian", hex: "#11202B" },
   { label: "Pure White", hex: "#FFFFFF" },
   { label: "Desert Sand", hex: "#D4B59E" },
@@ -60,11 +62,12 @@ export function CatalogView({
 
   const [categorySlug, setCategorySlug] = React.useState(initialCategorySlug);
   const [gender, setGender] = React.useState<string>("All");
+  const [shoeType, setShoeType] = React.useState<string>("All");
   const [brand, setBrand] = React.useState<string>("All");
   const [selectedSize, setSelectedSize] = React.useState<number | undefined>(undefined);
   const [selectedColor, setSelectedColor] = React.useState<string | undefined>(undefined);
-  const [minPrice, setMinPrice] = React.useState<number>(1000);
-  const [maxPrice, setMaxPrice] = React.useState<number>(12000);
+  const [minPrice, setMinPrice] = React.useState<number>(0);
+  const [maxPrice, setMaxPrice] = React.useState<number>(25000);
   const [inStockOnly, setInStockOnly] = React.useState<boolean>(true);
   const [onSaleOnly, setOnSaleOnly] = React.useState<boolean>(initialCategorySlug === "sale");
   const [sortBy, setSortBy] =
@@ -76,13 +79,14 @@ export function CatalogView({
 
   const { isMobileFilterOpen, setMobileFilterOpen } = useUiStore();
   const allStoreProducts = useCatalogStore((s) => s.products);
-  const { data: categories = [] } = useCategoriesQuery();
+  const { data: categories = [], isLoading: isCategoriesLoading } = useCategoriesQuery();
 
   const filters: ProductQueryFilters = React.useMemo(
     () => ({
       search: search || undefined,
       categorySlug,
       gender,
+      shoeType: shoeType === "All" ? undefined : shoeType,
       brand,
       size: selectedSize,
       colorHex: selectedColor,
@@ -96,6 +100,7 @@ export function CatalogView({
       search,
       categorySlug,
       gender,
+      shoeType,
       brand,
       selectedSize,
       selectedColor,
@@ -114,16 +119,29 @@ export function CatalogView({
     return ["All", ...Array.from(set)];
   }, [allStoreProducts]);
 
+  const filterSizes = React.useMemo(() => {
+    const sizeSet = new Set<number>(EU_SIZES);
+    for (const p of allStoreProducts) {
+      for (const cw of p.colorways) {
+        for (const sz of Object.keys(cw.stockBySize)) {
+          const parsed = Number(sz);
+          if (Number.isFinite(parsed) && parsed > 0) sizeSet.add(parsed);
+        }
+      }
+    }
+    return Array.from(sizeSet).sort((a, b) => a - b);
+  }, [allStoreProducts]);
+
   const sizeStockMap = React.useMemo(() => {
     const map: Record<number, number> = {};
-    for (const sz of EU_SIZES) {
+    for (const sz of filterSizes) {
       map[sz] = allStoreProducts.reduce(
         (acc, p) => acc + p.colorways.reduce((s, cw) => s + (cw.stockBySize[sz] ?? 0), 0),
         0,
       );
     }
     return map;
-  }, [allStoreProducts]);
+  }, [allStoreProducts, filterSizes]);
 
   const totalPages = Math.max(1, Math.ceil(products.length / itemsPerPage));
   const safePage = Math.min(currentPage, totalPages);
@@ -135,6 +153,7 @@ export function CatalogView({
   const activeFilterCount =
     (categorySlug !== "all" ? 1 : 0) +
     (gender !== "All" ? 1 : 0) +
+    (shoeType !== "All" ? 1 : 0) +
     (brand !== "All" ? 1 : 0) +
     (selectedSize ? 1 : 0) +
     (selectedColor ? 1 : 0) +
@@ -145,11 +164,12 @@ export function CatalogView({
     setSearch("");
     setCategorySlug(initialCategorySlug === "all" ? "all" : initialCategorySlug);
     setGender("All");
+    setShoeType("All");
     setBrand("All");
     setSelectedSize(undefined);
     setSelectedColor(undefined);
-    setMinPrice(1000);
-    setMaxPrice(12000);
+    setMinPrice(0);
+    setMaxPrice(25000);
     setInStockOnly(true);
     setOnSaleOnly(false);
     setCurrentPage(1);
@@ -169,46 +189,55 @@ export function CatalogView({
             </span>
           </div>
           <div className="space-y-1">
-            {[
-              { slug: "all", name: "All Footwear" },
-              ...categories.filter((c) => !["men", "women"].includes(c.slug)),
-            ].map((cat) => {
-              const checked = categorySlug === cat.slug;
-              const count =
-                cat.slug === "all"
-                  ? allStoreProducts.length
-                  : allStoreProducts.filter((p) => p.categorySlug === cat.slug).length;
-              return (
-                <button
-                  key={cat.slug}
-                  type="button"
-                  onClick={() => {
-                    setCategorySlug(cat.slug);
-                    setCurrentPage(1);
-                  }}
-                  className="flex w-full items-center justify-between rounded-lg py-1.5 text-left transition-colors hover:text-primary cursor-pointer"
-                >
-                  <span className="flex items-center gap-2.5">
-                    <span
-                      className={cn(
-                        "flex size-4 items-center justify-center rounded-sm border transition-colors",
-                        checked
-                          ? "border-primary bg-primary text-white"
-                          : "border-border bg-surface-low",
-                      )}
-                    >
-                      {checked ? <Check className="size-3" /> : null}
+            {isCategoriesLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between py-2">
+                  <SkeletonBase className="h-4 w-28 rounded-md" />
+                  <SkeletonBase className="h-4 w-6 rounded-md" />
+                </div>
+              ))
+            ) : (
+              [
+                { slug: "all", name: "All Footwear" },
+                ...categories.filter((c) => !["men", "women"].includes(c.slug)),
+              ].map((cat) => {
+                const checked = categorySlug === cat.slug;
+                const count =
+                  cat.slug === "all"
+                    ? allStoreProducts.length
+                    : allStoreProducts.filter((p) => p.categorySlug === cat.slug).length;
+                return (
+                  <button
+                    key={cat.slug}
+                    type="button"
+                    onClick={() => {
+                      setCategorySlug(cat.slug);
+                      setCurrentPage(1);
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg py-1.5 text-left transition-colors hover:text-primary cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <span
+                        className={cn(
+                          "flex size-4 items-center justify-center rounded-sm border transition-colors",
+                          checked
+                            ? "border-primary bg-primary text-white"
+                            : "border-border bg-surface-low",
+                        )}
+                      >
+                        {checked ? <Check className="size-3" /> : null}
+                      </span>
+                      <span className={cn("text-sm", checked ? "font-bold text-primary" : "")}>
+                        {cat.name}
+                      </span>
                     </span>
-                    <span className={cn("text-sm", checked ? "font-bold text-primary" : "")}>
-                      {cat.name}
+                    <span className="rounded-full bg-surface-low px-2 py-0.5 font-label text-[11px] font-semibold text-muted-foreground">
+                      {count}
                     </span>
-                  </span>
-                  <span className="rounded-full bg-surface-low px-2 py-0.5 font-label text-[11px] font-semibold text-muted-foreground">
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -219,8 +248,8 @@ export function CatalogView({
           <h3 className="font-label text-xs font-extrabold tracking-wider text-primary uppercase">
             Gender
           </h3>
-          <div className="grid grid-cols-3 gap-1.5">
-            {["All", "Men", "Women"].map((g) => (
+          <div className="flex flex-wrap gap-1.5">
+            {["All", ...SHOE_GENDERS].map((g) => (
               <button
                 key={g}
                 type="button"
@@ -229,7 +258,7 @@ export function CatalogView({
                   setCurrentPage(1);
                 }}
                 className={cn(
-                  "rounded-lg py-2 px-2 font-label text-xs font-bold transition-all cursor-pointer",
+                  "rounded-lg py-1.5 px-2.5 font-label text-xs font-bold transition-all cursor-pointer",
                   gender === g
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "bg-surface-low text-foreground hover:bg-surface-container",
@@ -239,6 +268,31 @@ export function CatalogView({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="h-px bg-border" />
+
+        {/* Shoe Type Filter */}
+        <div className="space-y-2">
+          <h3 className="font-label text-xs font-extrabold tracking-wider text-primary uppercase">
+            Shoe Type
+          </h3>
+          <select
+            value={shoeType}
+            onChange={(e) => {
+              setShoeType(e.target.value);
+              setCurrentPage(1);
+            }}
+            aria-label="Filter by shoe type"
+            className="h-10 w-full rounded-lg border border-border bg-surface-low px-3 text-xs font-semibold text-foreground focus:border-primary focus:outline-none cursor-pointer"
+          >
+            <option value="All">All Shoe Styles</option>
+            {SHOE_TYPES.map((st) => (
+              <option key={st} value={st}>
+                {st}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="h-px bg-border" />
@@ -282,7 +336,7 @@ export function CatalogView({
             </button>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            {EU_SIZES.map((sz) => {
+            {filterSizes.map((sz) => {
               const totalPairs = sizeStockMap[sz] ?? 0;
               const isOut = totalPairs <= 0;
               const isSelected = selectedSize === sz;
@@ -316,7 +370,7 @@ export function CatalogView({
                     className={cn(
                       "text-[10px]",
                       isSelected
-                        ? "text-[#B0ECFF]"
+                        ? "text-banner-accent"
                         : isOut
                           ? "text-muted-foreground/60"
                           : totalPairs <= 4
@@ -344,8 +398,8 @@ export function CatalogView({
           </div>
           <input
             type="range"
-            min={1500}
-            max={12000}
+            min={0}
+            max={25000}
             step={250}
             value={maxPrice}
             onChange={(e) => {
@@ -377,8 +431,8 @@ export function CatalogView({
                 type="number"
                 value={maxPrice}
                 min={minPrice}
-                max={20000}
-                onChange={(e) => setMaxPrice(Number(e.target.value) || 12000)}
+                max={50000}
+                onChange={(e) => setMaxPrice(Number(e.target.value) || 25000)}
                 className="w-full bg-transparent font-display text-sm font-bold text-foreground focus:outline-none"
               />
             </div>
@@ -460,13 +514,13 @@ export function CatalogView({
       {/* Telegram VIP Drop Alert Widget */}
       <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary to-primary-deep p-5 text-white shadow-md">
         <div className="relative z-10 space-y-2">
-          <span className="block font-label text-[10px] font-bold tracking-wider text-[#B0ECFF] uppercase">
+          <span className="block font-label text-[10px] font-bold tracking-wider text-banner-accent uppercase">
             Exclusive Drops
           </span>
           <h4 className="font-display text-base font-bold leading-snug">
             Addis Sneaker Telegram Bot
           </h4>
-          <p className="text-xs leading-relaxed text-[#EBF6F8]/85">
+          <p className="text-xs leading-relaxed text-banner-muted/85">
             Get 15-minute early notifications before rare size runs sell out in Bole.
           </p>
           <Link
@@ -490,18 +544,18 @@ export function CatalogView({
             <span className="rounded-full bg-cta px-2.5 py-0.5 font-label text-[10px] font-bold uppercase tracking-wider">
               Flash Drop
             </span>
-            <span className="text-[#EBF6F8]">
-              Addis Ababa Express Dispatch: Order within <strong className="text-[#FFDBD0]">03h 42m</strong>{" "}
+            <span className="text-banner-muted">
+              Addis Ababa Express Dispatch: Order within <strong className="text-banner-warm">03h 42m</strong>{" "}
               for same-day delivery across Bole, Kazanchis &amp; Sarbet.
             </span>
           </div>
-          <div className="hidden items-center gap-4 font-label text-[11px] text-[#EBF6F8] lg:flex">
+          <div className="hidden items-center gap-4 font-label text-[11px] text-banner-muted lg:flex">
             <span className="flex items-center gap-1">
-              <ShieldCheck className="size-3.5 text-[#FFDBD0]" /> Guaranteed 100% Authentic
+              <ShieldCheck className="size-3.5 text-banner-warm" /> Guaranteed 100% Authentic
             </span>
             <span>•</span>
             <span className="flex items-center gap-1">
-              <RefreshCw className="size-3.5 text-[#B0ECFF]" /> Size Exchange
+              <RefreshCw className="size-3.5 text-banner-accent" /> Size Exchange
             </span>
           </div>
         </div>
@@ -518,7 +572,7 @@ export function CatalogView({
           <div className="relative z-10 mx-auto flex h-full max-w-[1360px] flex-col justify-center px-4 text-white lg:px-8">
             <nav
               aria-label="Breadcrumb"
-              className="mb-2 flex items-center gap-2 font-label text-xs text-[#B0ECFF]"
+              className="mb-2 flex items-center gap-2 font-label text-xs text-banner-accent"
             >
               <Link href="/" className="hover:text-white">
                 Home
@@ -534,7 +588,7 @@ export function CatalogView({
               {pageTitle}
             </h1>
             {pageSubtitle ? (
-              <p className="mt-2 max-w-xl text-sm text-[#EBF6F8]/90">{pageSubtitle}</p>
+              <p className="mt-2 max-w-xl text-sm text-banner-muted/90">{pageSubtitle}</p>
             ) : null}
           </div>
         </div>
@@ -644,6 +698,19 @@ export function CatalogView({
               </span>
             ) : null}
 
+            {shoeType !== "All" ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-light px-3 py-1 font-label text-xs font-semibold text-primary">
+                Style: {shoeType}
+                <button
+                  type="button"
+                  onClick={() => setShoeType("All")}
+                  className="hover:text-destructive cursor-pointer"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            ) : null}
+
             {selectedSize ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-light px-3 py-1 font-label text-xs font-semibold text-primary">
                 Size: EU {selectedSize}
@@ -658,7 +725,7 @@ export function CatalogView({
             ) : null}
 
             {onSaleOnly ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFDBD0] px-3 py-1 font-label text-xs font-bold text-cta">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-cta-light px-3 py-1 font-label text-xs font-bold text-cta-text">
                 On Sale
                 <button
                   type="button"

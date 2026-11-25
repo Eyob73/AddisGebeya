@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck, Store, User } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Loader2, Lock, Mail, ShieldCheck, Store, User } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { BrandLogo } from "@/components/shared/brand-logo";
@@ -21,11 +22,14 @@ const loginSchema = z.object({
 
 type LoginValues = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const from = searchParams.get("from");
   const login = useAuthStore((s) => s.login);
   const addToast = useUiStore((s) => s.addToast);
   const [showPassword, setShowPassword] = React.useState(false);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   const {
     register,
@@ -36,21 +40,39 @@ export default function LoginPage() {
     resolver: zodResolver(loginSchema),
     defaultValues: {
       email: DEMO_CUSTOMER.email,
-      password: "password123",
+      password: "CustomerPass123!",
     },
   });
 
-  const onSubmit = (values: LoginValues) => {
-    const logged = login(values.email);
-    addToast({
-      title: `Welcome back, ${logged.name}!`,
-      description:
-        logged.role === "admin"
-          ? "Redirecting to Store Owner HQ Console."
-          : "Signed in to your AddisGebeya Shoes account.",
-      variant: "success",
-    });
-    router.push(logged.role === "admin" ? "/admin" : "/account");
+  const onSubmit = async (values: LoginValues) => {
+    try {
+      setIsSubmitting(true);
+      const logged = await login(values.email, values.password);
+      addToast({
+        title: `Welcome back, ${logged.name}!`,
+        description:
+          logged.role === "admin"
+            ? "Redirecting to Store Owner HQ Console."
+            : "Signed in to your AddisGebeya Shoes account.",
+        variant: "success",
+      });
+
+      const safeFrom = from && from.startsWith("/") && !from.startsWith("//") ? from : null;
+      if (safeFrom) {
+        router.push(safeFrom);
+      } else {
+        router.push(logged.role === "admin" ? "/admin" : "/account");
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Invalid email or password";
+      addToast({
+        title: "Sign In Failed",
+        description: message,
+        variant: "error",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -92,8 +114,8 @@ export default function LoginPage() {
               <label htmlFor="password" className="font-label text-xs font-bold">
                 Password
               </label>
-              <Link href="/contact" className="font-label text-[11px] font-bold text-primary hover:underline">
-                Need help?
+              <Link href="/forgot-password" className="font-label text-[11px] font-bold text-primary hover:underline">
+                Forgot password?
               </Link>
             </div>
             <div className="relative">
@@ -118,15 +140,22 @@ export default function LoginPage() {
             ) : null}
           </div>
 
-          <Button type="submit" variant="cta" size="lg" className="mt-2 w-full">
-            Sign In
+          <Button type="submit" variant="cta" size="lg" className="mt-2 w-full" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                <span>Signing In...</span>
+              </>
+            ) : (
+              "Sign In"
+            )}
           </Button>
         </form>
 
-        {/* Quick Demo Role Switchers (Clearly labeled temporary preview auth) */}
+        {/* Quick Demo Role Switchers (Configured with real seed accounts) */}
         <div className="mt-6 space-y-2.5 border-t border-border pt-5">
           <p className="flex items-center justify-center gap-1.5 font-label text-[11px] font-bold text-muted-foreground uppercase">
-            <ShieldCheck className="size-3.5 text-primary" /> Local Preview Quick Fill
+            <ShieldCheck className="size-3.5 text-primary" /> Seed Account Quick Fill
           </p>
           <div className="grid grid-cols-2 gap-2">
             <Button
@@ -135,7 +164,7 @@ export default function LoginPage() {
               size="sm"
               onClick={() => {
                 setValue("email", DEMO_CUSTOMER.email);
-                setValue("password", "password123");
+                setValue("password", "CustomerPass123!");
               }}
             >
               <User className="size-3.5" /> Customer Demo
@@ -146,7 +175,7 @@ export default function LoginPage() {
               size="sm"
               onClick={() => {
                 setValue("email", DEMO_OWNER.email);
-                setValue("password", "owner1234");
+                setValue("password", "AdminPass123!");
               }}
             >
               <Store className="size-3.5" /> Store Owner
@@ -174,3 +203,17 @@ export default function LoginPage() {
   );
 }
 
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="w-full max-w-md animate-pulse space-y-6">
+          <div className="h-12 w-32 mx-auto rounded-lg bg-surface-container" />
+          <div className="h-80 w-full rounded-2xl bg-surface-container" />
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
+  );
+}

@@ -6,14 +6,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog, ModalDialog } from "@/components/ui/dialog";
 import { Input, Textarea } from "@/components/ui/input";
+import { AdminTablePageSkeleton } from "@/components/shared/page-skeletons";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 import { HERO_ASSETS } from "@/data/mock-footwear";
-import { useCatalogStore } from "@/stores/catalog.store";
+import { useCategoriesQuery, useProductsQuery } from "@/hooks/use-store-queries";
+import { storeService } from "@/services/store.service";
 import { useUiStore } from "@/stores/ui.store";
 import type { ShoeCategory } from "@/types/store.types";
 import { slugify } from "@/utils/format";
 
 export default function AdminCategoriesPage() {
-  const { categories, products, addCategory, updateCategory, deleteCategory } = useCatalogStore();
+  const { data: categories = [], isLoading, refetch } = useCategoriesQuery();
+  const { data: products = [] } = useProductsQuery();
   const addToast = useUiStore((s) => s.addToast);
 
   const [modalOpen, setModalOpen] = React.useState(false);
@@ -26,6 +30,7 @@ export default function AdminCategoriesPage() {
   const [description, setDescription] = React.useState("");
   const [image, setImage] = React.useState(HERO_ASSETS.heroSneaker);
   const [featured, setFeatured] = React.useState(true);
+  const isMounted = useIsMounted();
 
   const openCreate = () => {
     setEditing(null);
@@ -49,11 +54,11 @@ export default function AdminCategoriesPage() {
     setModalOpen(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     if (editing) {
-      updateCategory(editing.id, {
+      await storeService.updateCategory(editing.id, {
         name: name.trim(),
         eyebrow: eyebrow.trim() || "Collection",
         subtitle: subtitle.trim(),
@@ -61,10 +66,10 @@ export default function AdminCategoriesPage() {
         image: image.trim() || HERO_ASSETS.heroSneaker,
         featured,
       });
+      refetch();
       addToast({ title: "Category Updated", description: `${name} updated.`, variant: "success" });
     } else {
-      addCategory({
-        id: `cat-${Date.now()}`,
+      await storeService.createCategory({
         slug: slugify(name),
         name: name.trim(),
         eyebrow: eyebrow.trim() || "New Line",
@@ -74,10 +79,15 @@ export default function AdminCategoriesPage() {
         featured,
         active: true,
       });
+      refetch();
       addToast({ title: "Category Created", description: `${name} added.`, variant: "success" });
     }
     setModalOpen(false);
   };
+
+  if (!isMounted || isLoading) {
+    return <AdminTablePageSkeleton title="Categories" hasCreateButton={true} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -115,7 +125,7 @@ export default function AdminCategoriesPage() {
                     {cat.featured ? <Badge variant="cta">Homepage Bento</Badge> : null}
                   </div>
                   <div className="absolute bottom-3 left-3 text-white">
-                    <span className="block font-label text-[10px] font-bold uppercase text-[#B0ECFF]">
+                    <span className="block font-label text-[10px] font-bold uppercase text-banner-accent">
                       {cat.eyebrow}
                     </span>
                     <h2 className="font-display text-lg font-bold">{cat.name}</h2>
@@ -132,7 +142,10 @@ export default function AdminCategoriesPage() {
               <div className="flex items-center justify-between border-t border-border bg-surface-low/50 px-4 py-3">
                 <button
                   type="button"
-                  onClick={() => updateCategory(cat.id, { active: !cat.active })}
+                  onClick={async () => {
+                    await storeService.updateCategory(cat.id, { active: !cat.active });
+                    refetch();
+                  }}
                   className="font-label text-xs font-bold text-primary hover:underline cursor-pointer"
                 >
                   {cat.active ? "Hide Category" : "Activate"}
@@ -211,9 +224,10 @@ export default function AdminCategoriesPage() {
         confirmLabel="Delete Category"
         title={`Delete "${pendingDelete?.name}"?`}
         description="Products in this category will remain in your catalog but will no longer appear under this category landing page."
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!pendingDelete) return;
-          deleteCategory(pendingDelete.id);
+          await storeService.deleteCategory(pendingDelete.id);
+          refetch();
           addToast({ title: "Category Deleted", variant: "warning" });
         }}
       />

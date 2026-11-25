@@ -2,21 +2,19 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
-  Building2,
   Check,
   CheckCircle2,
   Clock,
+  Copy,
   Handshake,
   Info,
-  Landmark,
   Lock,
   Mail,
   MapPin,
   Phone,
-  QrCode,
   ShieldCheck,
   ShoppingBag,
   Tag,
@@ -24,20 +22,30 @@ import {
   User,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { BrandLogo } from "@/components/shared/brand-logo";
+import { CheckoutPageSkeleton } from "@/components/shared/page-skeletons";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, Textarea } from "@/components/ui/input";
 import { ADDIS_SUBCITIES, ETHIOPIAN_CITIES } from "@/data/mock-footwear";
+import { usePaymentProvidersQuery, usePaymentStatusQuery } from "@/hooks/use-store-queries";
 import { useAuthStore } from "@/stores/auth.store";
 import { computeCartTotals, useCartStore } from "@/stores/cart.store";
 import { useCatalogStore } from "@/stores/catalog.store";
 import { useUiStore } from "@/stores/ui.store";
+import { storeService } from "@/services/store.service";
 import type { OrderRecord, PaymentMethod } from "@/types/store.types";
 import { formatETB, formatETBPrefix } from "@/utils/format";
 import { cn } from "@/lib/utils";
+import { DEFAULT_FALLBACK_IMAGE, getThumbnailImageUrl } from "@/utils/cloudinary";
+import {
+  isPaymentSettledStatus,
+  PaymentVerificationPanel,
+} from "@/features/payment/payment-verification-panel";
 
 const checkoutSchema = z.object({
   fullName: z.string().min(2, "Please enter your full name"),
@@ -53,81 +61,54 @@ const checkoutSchema = z.object({
 
 type CheckoutFormValues = z.infer<typeof checkoutSchema>;
 
-const PAYMENT_OPTIONS: Array<{
-  id: PaymentMethod;
-  title: string;
-  desc: string;
-  icon: typeof QrCode;
-  noteTitle: string;
-  noteBody: string;
-}> = [
-  {
-    id: "telebirr",
-    title: "Telebirr",
-    desc: "Pay via Telebirr SuperApp QR or USSD reference after order confirmation.",
-    icon: QrCode,
-    noteTitle: "Telebirr Payment Instructions:",
-    noteBody:
-      "No real card or mobile money is charged in this preview. After placing your order, you will receive your official Order ID and Telebirr merchant reference instructions.",
-  },
-  {
-    id: "cbe_birr",
-    title: "CBE Birr",
-    desc: "Direct mobile transfer via Commercial Bank of Ethiopia (*847#).",
-    icon: Landmark,
-    noteTitle: "CBE Birr Reference:",
-    noteBody:
-      "Transfer using Commercial Bank of Ethiopia mobile app referencing your Order ID. Our Bole HQ team verifies receipts within minutes.",
-  },
-  {
-    id: "bank_transfer",
-    title: "Bank Transfer",
-    desc: "Awash, Dashen, BoA, or Hibret bank transfer receipt verification.",
-    icon: Building2,
-    noteTitle: "Bank Wire Transfer:",
-    noteBody:
-      "Awash Bank & Dashen Bank account details will appear on your confirmation receipt so you can attach your transfer slip.",
-  },
-  {
-    id: "cod",
-    title: "Cash / POS",
-    desc: "Inspect and try on your sneakers first; pay rider via cash or POS.",
-    icon: Handshake,
-    noteTitle: "Pay on Arrival (Zero Risk):",
-    noteBody:
-      "Try your shoes on with our Bole courier. Pay in Ethiopian Birr cash or domestic debit POS once satisfied with the fit.",
-  },
-];
-
-function generateOrderMeta() {
-  const orderNum = `AG-${Math.floor(9485 + Math.random() * 500)}`;
-  const now = new Date();
-  return {
-    orderNum,
-    customerFallbackId: `cust-${now.getTime()}`,
-    nowIso: now.toISOString(),
-    nowTime: now.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-  };
-}
-
 export function CheckoutView() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const orderQueryParam = searchParams.get("order") ?? "";
+
   const {
     items,
     appliedPromoCode,
+    activePromo,
     deliverySpeed,
     setDeliverySpeed,
     clearCart,
   } = useCartStore();
-  const { settings, createOrder, decrementStockForOrder } = useCatalogStore();
+  const settings = useCatalogStore((s) => s.settings);
   const user = useAuthStore((s) => s.user);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const addToast = useUiStore((s) => s.addToast);
 
-  const [paymentMethod, setPaymentMethod] = React.useState<PaymentMethod>("telebirr");
+  const { data: liveProviders = [], isLoading: loadingProviders } = usePaymentProvidersQuery();
+
+  const [selectedPaymentMethod, setPaymentMethod] = React.useState<PaymentMethod>("cbe");
+  const paymentMethod: PaymentMethod =
+    selectedPaymentMethod === "cod" ||
+      liveProviders.length === 0 ||
+      liveProviders.some((p) => p.id === selectedPaymentMethod)
+      ? selectedPaymentMethod
+      : liveProviders[0]!.id;
   const [countdownSeconds, setCountdownSeconds] = React.useState(892);
   const [confirmedOrder, setConfirmedOrder] = React.useState<OrderRecord | null>(null);
+  const [copiedAccount, setCopiedAccount] = React.useState(false);
+  const isMounted = useIsMounted();
+
+  // Rehydrate order when returning or refreshing page with ?order=AG-XXXX
+  React.useEffect(() => {
+    if (!orderQueryParam) return;
+    if (confirmedOrder?.id === orderQueryParam) return;
+
+    storeService
+      .getOrderById(orderQueryParam)
+      .then((order) => {
+        if (order) {
+          setConfirmedOrder(order);
+        }
+      })
+      .catch(() => { });
+  }, [orderQueryParam, confirmedOrder?.id]);
+
+  const { data: activeOrderPaymentStatus } = usePaymentStatusQuery(confirmedOrder?.id);
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
@@ -149,6 +130,7 @@ export function CheckoutView() {
         settings.freeDeliveryThresholdETB,
         settings.standardAddisDeliveryFeeETB,
         settings.vipTwoHourDeliveryFeeETB,
+        activePromo,
       ),
     [
       items,
@@ -157,6 +139,7 @@ export function CheckoutView() {
       settings.freeDeliveryThresholdETB,
       settings.standardAddisDeliveryFeeETB,
       settings.vipTwoHourDeliveryFeeETB,
+      activePromo,
     ],
   );
 
@@ -167,117 +150,108 @@ export function CheckoutView() {
   } = useForm<CheckoutFormValues>({
     resolver: zodResolver(checkoutSchema),
     defaultValues: {
-      fullName: user?.name ?? "Abebe Tadesse",
+      fullName: user?.name ?? "",
       phone: user?.phone ?? "+251 911 234 567",
-      email: user?.email ?? "abebe.t@gmail.com",
+      email: user?.email ?? "",
       city: "Addis Ababa",
-      subCity: ADDIS_SUBCITIES[0],
-      landmark: "Near Medhanialem Church, Morning Star Mall 3rd floor, Office 304",
-      riderNotes: "Please call when you reach the gate. Security will direct you to elevator B.",
+      subCity: user?.subCity || ADDIS_SUBCITIES[0],
+      landmark: "",
+      riderNotes: "",
     },
   });
 
-  const activePayment =
-    PAYMENT_OPTIONS.find((p) => p.id === paymentMethod) ?? PAYMENT_OPTIONS[0]!;
+  const selectedProviderInfo = liveProviders.find((p) => p.id === paymentMethod);
 
-  const onSubmit = (values: CheckoutFormValues) => {
+  const handleCopyAccountNumber = async () => {
+    if (!selectedProviderInfo?.receivingAccountNumber) return;
+    try {
+      await navigator.clipboard.writeText(selectedProviderInfo.receivingAccountNumber);
+      setCopiedAccount(true);
+      setTimeout(() => setCopiedAccount(false), 1800);
+    } catch {
+      // Clipboard unavailable
+    }
+  };
+
+  const onSubmit = async (values: CheckoutFormValues) => {
     if (items.length === 0) return;
 
-    const { orderNum, customerFallbackId, nowIso, nowTime } = generateOrderMeta();
+    if (!isAuthenticated) {
+      addToast({
+        title: "Sign In Required",
+        description: "Please sign in so we can link and verify your bank payment securely.",
+        variant: "warning",
+      });
+      router.push("/login?redirect=/checkout");
+      return;
+    }
 
-    const newOrder: OrderRecord = {
-      id: orderNum,
-      customerId: user?.id ?? customerFallbackId,
-      customerName: values.fullName,
-      customerPhone: values.phone,
-      customerEmail: values.email,
-      city: values.city,
-      subCity: values.subCity,
-      landmark: values.landmark,
-      riderNotes: values.riderNotes,
-      deliverySpeed,
-      deliveryFeeETB: totals.deliveryFeeETB,
-      subtotalETB: totals.subtotalETB,
-      discountETB: totals.discountETB,
-      promoCode: totals.activePromo?.code,
-      totalETB: totals.totalETB,
-      paymentMethod,
-      paymentStatus: paymentMethod === "cod" ? "cod_due" : "pending",
-      status: "confirmed",
-      items: items.map((item) => ({
-        productId: item.productId,
-        productName: item.productName,
-        sku: item.productId.toUpperCase(),
-        colorwayName: item.colorwayName,
-        size: item.size,
-        quantity: item.quantity,
-        unitPriceETB: item.unitPriceETB,
-        image: item.image,
-      })),
-      trackingEvents: [
-        {
-          step: "Order Confirmed",
-          description: `Order #${orderNum} received and pairs reserved at Bole Medhanialem Hub.`,
-          timestamp: `Today, ${nowTime}`,
-          completed: true,
-          current: true,
-        },
-        {
-          step:
-            paymentMethod === "cod"
-              ? "Cash / POS on Delivery Selected"
-              : "Awaiting Payment Verification",
-          description:
-            paymentMethod === "cod"
-              ? "Pay our courier after trying on your shoes."
-              : "Complete your mobile transfer using your Order ID reference.",
-          timestamp: "Pending",
-          completed: false,
-        },
-        {
-          step: "Packed & Quality Checked",
-          description: "Serial verification & silk dust bag packaging.",
-          timestamp: "Pending",
-          completed: false,
-        },
-        {
-          step: "Out with Addis Courier",
-          description:
-            deliverySpeed === "vip"
-              ? "VIP 2-Hour motorcycle courier dispatch."
-              : "Same-day express courier dispatch.",
-          timestamp: "Pending",
-          completed: false,
-        },
-      ],
-      createdAt: nowIso,
-    };
-
-    // Deduct size+colorway stock immediately for non-accessory footwear items
-    decrementStockForOrder(
-      items
-        .filter((i) => !i.isAccessory)
-        .map((i) => ({
-          productId: i.productId,
-          colorwayId: i.colorwayId,
-          size: i.size,
-          quantity: i.quantity,
+    try {
+      const placedOrder = await storeService.createOrder({
+        customerId: user?.id,
+        customerName: values.fullName.trim(),
+        customerPhone: values.phone.trim(),
+        customerEmail: values.email.trim(),
+        city: values.city,
+        subCity: values.subCity,
+        landmark: values.landmark.trim(),
+        riderNotes: values.riderNotes?.trim() || undefined,
+        deliverySpeed,
+        deliveryFeeETB: totals.deliveryFeeETB,
+        subtotalETB: totals.subtotalETB,
+        discountETB: totals.discountETB,
+        promoCode: appliedPromoCode ?? undefined,
+        totalETB: totals.totalETB,
+        paymentMethod,
+        items: items.map((item) => ({
+          productId: item.productId,
+          colorwayId: item.colorwayId,
+          productName: item.productName,
+          sku: item.productId.toUpperCase(),
+          colorwayName: item.colorwayName,
+          size: item.size,
+          quantity: item.quantity,
+          unitPriceETB: item.unitPriceETB,
+          image: item.image,
         })),
-    );
-    createOrder(newOrder);
-    clearCart();
-    setConfirmedOrder(newOrder);
+      });
 
-    addToast({
-      title: `Order #${orderNum} Confirmed!`,
-      description: "Your footwear order has been placed and stock reserved.",
-      variant: "success",
-    });
+      clearCart();
+      setConfirmedOrder(placedOrder);
+      router.replace(`/checkout?order=${encodeURIComponent(placedOrder.id)}`);
+
+      addToast({
+        title:
+          paymentMethod === "cod"
+            ? `Order #${placedOrder.id} Logged!`
+            : `Order #${placedOrder.id} Created — Verify Payment`,
+        description:
+          paymentMethod === "cod"
+            ? "Cash on Delivery request registered. Awaiting confirmation."
+            : "Transfer to the displayed account and click Verify Payment.",
+        variant: "success",
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to place order.";
+      addToast({
+        title: "Order Failed",
+        description: message,
+        variant: "error",
+      });
+    }
   };
+
+  const resolvedOrderPaymentStatus =
+    activeOrderPaymentStatus?.paymentStatus ?? confirmedOrder?.paymentStatus ?? "Pending";
+  const resolvedOrderStatus =
+    activeOrderPaymentStatus?.orderStatus ?? confirmedOrder?.status ?? "PendingPayment";
+  const resolvedReceiptStatus =
+    activeOrderPaymentStatus?.receiptStatus ?? confirmedOrder?.receiptStatus ?? null;
+  const isConfirmedPaid = isPaymentSettledStatus(resolvedOrderPaymentStatus);
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* Top Checkout Trust Banner (Exact Stitch Checkout Header) */}
+      {/* Top Checkout Trust Banner */}
       <header className="w-full bg-primary-deep px-4 py-3 text-white shadow-sm lg:px-8">
         <div className="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -286,14 +260,14 @@ export function CheckoutView() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 font-label text-xs font-semibold text-[#B0ECFF]">
+          <div className="flex items-center gap-2 font-label text-xs font-semibold text-banner-accent">
             <Lock className="size-3.5" />
-            <span>Encrypted &amp; 256-Bit Secure Checkout</span>
+            <span>Encrypted &amp; Institution-Verified Checkout</span>
           </div>
 
-          <div className="hidden items-center gap-4 text-xs text-[#EBF6F8]/90 md:flex">
+          <div className="hidden items-center gap-4 text-xs text-banner-muted/90 md:flex">
             <span className="flex items-center gap-1.5">
-              <Truck className="size-4 text-[#FFDBD0]" /> Bole Hub Active
+              <Truck className="size-4 text-banner-warm" /> Bole Hub Active
             </span>
             <span>•</span>
             <span>Support: {settings.phone}</span>
@@ -302,61 +276,118 @@ export function CheckoutView() {
       </header>
 
       <div className="mx-auto w-full max-w-[1360px] flex-1 px-4 py-8 lg:px-8">
-        {confirmedOrder ? (
-          /* Order Confirmation Screen */
-          <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-surface p-6 shadow-xl sm:p-10">
-            <div className="mb-6 flex flex-col items-center text-center">
-              <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                <CheckCircle2 className="size-9" />
+        {!isMounted ? (
+          <CheckoutPageSkeleton />
+        ) : confirmedOrder ? (
+          /* Order Verification & Confirmation Screen */
+          <div className="mx-auto max-w-3xl space-y-6">
+            <div className="rounded-2xl border border-border bg-surface p-6 shadow-xl sm:p-8">
+              <div className="mb-6 flex flex-col items-center text-center">
+                <div
+                  className={cn(
+                    "mb-4 flex size-16 items-center justify-center rounded-full",
+                    isConfirmedPaid
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                      : "bg-primary-light text-primary",
+                  )}
+                >
+                  {isConfirmedPaid ? (
+                    <CheckCircle2 className="size-9" />
+                  ) : (
+                    <Clock className="size-8" />
+                  )}
+                </div>
+                <Badge
+                  variant={
+                    isConfirmedPaid
+                      ? "success"
+                      : resolvedReceiptStatus === "Rejected"
+                        ? "destructive"
+                        : "warning"
+                  }
+                  className="mb-2"
+                >
+                  {isConfirmedPaid
+                    ? "Order Confirmed & Paid"
+                    : resolvedReceiptStatus === "Pending"
+                      ? `Receipt Pending Verification • Order ${resolvedOrderStatus}`
+                      : resolvedReceiptStatus === "Rejected"
+                        ? "Receipt Rejected — Replacement Needed"
+                        : `Status: ${resolvedOrderStatus} • ${resolvedOrderPaymentStatus}`}
+                </Badge>
+                <h1 className="font-display text-2xl font-extrabold text-foreground sm:text-3xl">
+                  {isConfirmedPaid
+                    ? `Payment Confirmed, ${confirmedOrder.customerName}!`
+                    : `Complete Payment for Order #${confirmedOrder.id}`}
+                </h1>
+                <p className="mt-2 max-w-lg text-sm text-muted-foreground">
+                  {isConfirmedPaid
+                    ? "Your payment has been verified and your AddisGebeya footwear order is confirmed for dispatch."
+                    : resolvedReceiptStatus === "Pending"
+                      ? "Your payment receipt has been received and is awaiting verification by our finance team."
+                      : resolvedReceiptStatus === "Rejected"
+                        ? "Your previous receipt could not be approved. Please upload or capture a clear replacement receipt below."
+                        : "Your stock is reserved. Complete your bank or mobile money transfer and upload or capture your receipt below."}
+                </p>
               </div>
-              <Badge variant="success" className="mb-2">
-                Order Placed &amp; Stock Reserved
-              </Badge>
-              <h1 className="font-display text-2xl font-extrabold text-foreground sm:text-3xl">
-                Thank You, {confirmedOrder.customerName}!
-              </h1>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Your order <strong className="text-primary">#{confirmedOrder.id}</strong> has been
-                logged at our Bole Medhanialem fulfillment center.
-              </p>
+
+              <div className="grid grid-cols-1 gap-3 rounded-xl bg-surface-low p-4 text-xs sm:grid-cols-4">
+                <div>
+                  <span className="text-muted-foreground">Order Number</span>
+                  <p className="font-mono font-bold text-primary">#{confirmedOrder.id}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Destination</span>
+                  <p className="truncate font-semibold text-foreground">
+                    {confirmedOrder.subCity}, {confirmedOrder.city}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Order Status</span>
+                  <p className="font-bold text-foreground">{resolvedOrderStatus}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Total Due</span>
+                  <p className="font-display text-base font-extrabold text-cta">
+                    {formatETB(confirmedOrder.totalETB)}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-4 rounded-xl bg-surface-low p-5 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Order Number</span>
-                <span className="font-mono font-bold text-primary">#{confirmedOrder.id}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Delivery Destination</span>
-                <span className="text-right font-semibold text-foreground">
-                  {confirmedOrder.subCity}, {confirmedOrder.city}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Payment Option</span>
-                <span className="font-semibold text-foreground uppercase">
-                  {confirmedOrder.paymentMethod.replace("_", " ")} (
-                  {confirmedOrder.paymentStatus === "cod_due"
-                    ? "Pay on Delivery"
-                    : "Awaiting Transfer Verification"}
-                  )
-                </span>
-              </div>
-              <div className="flex justify-between border-t border-border pt-3">
-                <span className="font-bold text-foreground">Total Due</span>
-                <span className="font-display text-xl font-extrabold text-cta">
-                  {formatETB(confirmedOrder.totalETB)}
-                </span>
-              </div>
-            </div>
+            {confirmedOrder.paymentMethod !== "cod" ? (
+              <PaymentVerificationPanel
+                orderNumber={confirmedOrder.id}
+                initialProvider={confirmedOrder.paymentMethod}
+                initialStatus={resolvedOrderPaymentStatus}
+                initialReference={confirmedOrder.paymentReference}
+                totalETB={confirmedOrder.totalETB}
+                providers={liveProviders}
+                onVerified={(res) => {
+                  setConfirmedOrder((prev) =>
+                    prev
+                      ? {
+                        ...prev,
+                        paymentStatus: "Paid",
+                        status: "Confirmed",
+                        paymentReference: res.reference,
+                      }
+                      : null,
+                  );
+                }}
+              />
+            ) : null}
 
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
               <Button asChild variant="cta" size="lg">
                 <Link href={`/account/tracking?order=${confirmedOrder.id}`}>
                   Track Order #{confirmedOrder.id}
                 </Link>
               </Button>
               <Button asChild variant="outline" size="lg">
+                <Link href="/account/orders">View Order History</Link>
+              </Button>
+              <Button asChild variant="ghost" size="lg">
                 <Link href="/shop">Continue Shopping</Link>
               </Button>
             </div>
@@ -391,9 +422,24 @@ export function CheckoutView() {
                 </h1>
               </div>
               <span className="hidden items-center gap-1.5 rounded-full bg-primary-light px-3.5 py-1.5 font-label text-xs font-bold text-primary sm:inline-flex">
-                <ShieldCheck className="size-4" /> Authentic Stock Guarantee
+                <ShieldCheck className="size-4" /> Real-Time Bank Verification
               </span>
             </div>
+
+            {!isAuthenticated ? (
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-50 px-5 py-3.5 text-xs text-amber-950 dark:bg-amber-950/40 dark:text-amber-200">
+                <div className="flex items-center gap-2.5">
+                  <Lock className="size-4 shrink-0" />
+                  <span>
+                    Sign in to your AddisGebeya account to link your order and verify bank
+                    transfers securely.
+                  </span>
+                </div>
+                <Button asChild size="sm" variant="cta">
+                  <Link href="/login?redirect=/checkout">Sign In to Continue</Link>
+                </Button>
+              </div>
+            ) : null}
 
             <form
               onSubmit={handleSubmit(onSubmit)}
@@ -537,7 +583,12 @@ export function CheckoutView() {
                         Specific Landmark / Building Details *
                       </label>
                       <div className="relative">
-                        <Input id="landmark" {...register("landmark")} className="pr-10" />
+                        <Input
+                          id="landmark"
+                          placeholder="e.g., Near Medhanialem Church, Morning Star Mall 3rd floor"
+                          {...register("landmark")}
+                          className="pr-10"
+                        />
                         <MapPin className="pointer-events-none absolute top-3 right-3.5 size-4 text-muted-foreground" />
                       </div>
                       {errors.landmark ? (
@@ -572,13 +623,13 @@ export function CheckoutView() {
                             Standard Express
                           </span>
                           <span className="font-label text-xs font-extrabold text-cta">
-                            {totals.qualifiesForFreeDelivery
+                            {totals.isFreeDelivery
                               ? "FREE"
                               : formatETB(settings.standardAddisDeliveryFeeETB)}
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Same-Day Addis drop. Delivered before 6:00 PM today.
+                          Same-Day Addis drop. Delivered after payment confirmation.
                         </p>
                       </div>
                     </label>
@@ -621,78 +672,195 @@ export function CheckoutView() {
                     >
                       Special Instructions for Rider
                     </label>
-                    <Textarea id="riderNotes" rows={2} {...register("riderNotes")} />
+                    <Textarea
+                      id="riderNotes"
+                      rows={2}
+                      placeholder="Gate code, call upon arrival, etc."
+                      {...register("riderNotes")}
+                    />
                   </div>
                 </section>
 
-                {/* STEP 3: Payment Method */}
+                {/* STEP 3: Dynamic Ethiopian Payment Providers */}
                 <section className="rounded-xl border border-border bg-surface p-6 shadow-card">
-                  <div className="mb-4 flex items-center justify-between">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-3">
                       <span className="flex size-7 items-center justify-center rounded-full bg-primary font-display text-xs font-bold text-primary-foreground">
                         3
                       </span>
                       <h2 className="font-display text-lg font-bold text-foreground">
-                        Payment Method
+                        Ethiopian Bank &amp; Mobile Money
                       </h2>
                     </div>
-                    <span className="font-label text-xs text-muted-foreground">
-                      Order Verification Flow
-                    </span>
+                    <Badge variant="soft">Instant Verification</Badge>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {PAYMENT_OPTIONS.map((opt) => {
-                      const Icon = opt.icon;
-                      const active = paymentMethod === opt.id;
-                      return (
+                  {loadingProviders ? (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {Array.from({ length: 6 }).map((_, idx) => (
+                        <div
+                          key={idx}
+                          className="h-20 animate-pulse rounded-xl bg-surface-low"
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3">
+                      {liveProviders.map((provider) => {
+                        const active = paymentMethod === provider.id;
+                        return (
+                          <button
+                            key={provider.id}
+                            type="button"
+                            onClick={() => setPaymentMethod(provider.id)}
+                            className={cn(
+                              "flex flex-col justify-between rounded-xl border-[1.5px] p-3.5 text-left transition-all cursor-pointer",
+                              active
+                                ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                                : "border-border bg-surface-low/60 text-foreground hover:border-primary/60 hover:bg-surface-container/60",
+                            )}
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <span
+                                className="flex size-7 shrink-0 items-center justify-center rounded-lg font-mono text-[10px] font-extrabold text-white"
+                                style={{ backgroundColor: provider.color }}
+                              >
+                                {provider.initials}
+                              </span>
+                              <span
+                                className={cn(
+                                  "flex size-5 items-center justify-center rounded-full border",
+                                  active
+                                    ? "border-white bg-white text-primary"
+                                    : "border-border bg-surface",
+                                )}
+                              >
+                                {active ? <Check className="size-3" /> : null}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="font-display text-xs font-bold leading-snug">
+                                {provider.name}
+                              </p>
+                              <p
+                                className={cn(
+                                  "mt-0.5 text-[10px]",
+                                  active
+                                    ? "text-primary-foreground/85"
+                                    : "text-muted-foreground",
+                                )}
+                              >
+                                {provider.healthStatus === "reachable"
+                                  ? "Live Auto-Verify"
+                                  : provider.healthStatus === "geo-blocked"
+                                    ? "May require review"
+                                    : provider.type.toUpperCase()}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                      {settings.paymentMethods.cod ? (
                         <button
-                          key={opt.id}
                           type="button"
-                          onClick={() => setPaymentMethod(opt.id)}
+                          onClick={() => setPaymentMethod("cod")}
                           className={cn(
-                            "flex flex-col justify-between rounded-xl border-[1.5px] p-4 text-left transition-all cursor-pointer",
-                            active
+                            "flex flex-col justify-between rounded-xl border-[1.5px] p-3.5 text-left transition-all cursor-pointer",
+                            paymentMethod === "cod"
                               ? "border-primary bg-primary text-primary-foreground shadow-sm"
                               : "border-border bg-surface-low/60 text-foreground hover:border-primary/60 hover:bg-surface-container/60",
                           )}
                         >
                           <div className="mb-2 flex items-center justify-between">
-                            <span className="flex items-center gap-2 font-display text-sm font-bold">
-                              <Icon className="size-4" />
-                              {opt.title}
+                            <span className="flex size-7 items-center justify-center rounded-lg bg-slate-700 text-white">
+                              <Handshake className="size-4" />
                             </span>
                             <span
                               className={cn(
                                 "flex size-5 items-center justify-center rounded-full border",
-                                active
+                                paymentMethod === "cod"
                                   ? "border-white bg-white text-primary"
                                   : "border-border bg-surface",
                               )}
                             >
-                              {active ? <Check className="size-3" /> : null}
+                              {paymentMethod === "cod" ? <Check className="size-3" /> : null}
                             </span>
                           </div>
-                          <p
-                            className={cn(
-                              "text-xs",
-                              active ? "text-[#EBF6F8]/90" : "text-muted-foreground",
-                            )}
-                          >
-                            {opt.desc}
-                          </p>
+                          <div>
+                            <p className="font-display text-xs font-bold">Cash / POS on Delivery</p>
+                            <p
+                              className={cn(
+                                "mt-0.5 text-[10px]",
+                                paymentMethod === "cod"
+                                  ? "text-primary-foreground/85"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              Pay at door after inspection
+                            </p>
+                          </div>
                         </button>
-                      );
-                    })}
-                  </div>
+                      ) : null}
+                    </div>
+                  )}
 
-                  <div className="mt-4 flex items-start gap-3 rounded-xl bg-surface-container/70 p-3.5 text-xs">
-                    <Info className="mt-0.5 size-4 shrink-0 text-primary" />
-                    <p className="text-muted-foreground">
-                      <strong className="text-primary">{activePayment.noteTitle}</strong>{" "}
-                      {activePayment.noteBody}
-                    </p>
-                  </div>
+                  {/* Receiving Account Preview Before Placing Order */}
+                  {selectedProviderInfo ? (
+                    <div className="mt-4 space-y-2.5 rounded-xl bg-surface-container/70 p-4 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 font-label font-bold text-primary">
+                          <Info className="size-4 shrink-0" />
+                          Transfer Destination: {selectedProviderInfo.name}
+                        </span>
+                        <span className="font-mono font-extrabold text-cta">
+                          {formatETB(totals.totalETB)}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface p-3">
+                        <div>
+                          <span className="text-[11px] text-muted-foreground">Account Name:</span>
+                          <p className="font-bold text-foreground">
+                            {selectedProviderInfo.receivingAccountName}
+                          </p>
+                          <span className="mt-1 block text-[11px] text-muted-foreground">
+                            Account Number:
+                          </span>
+                          <p className="font-mono text-sm font-extrabold text-primary">
+                            {selectedProviderInfo.receivingAccountNumber}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={handleCopyAccountNumber}
+                        >
+                          {copiedAccount ? (
+                            <Check className="size-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="size-3.5" />
+                          )}
+                          <span>{copiedAccount ? "Copied" : "Copy Account"}</span>
+                        </Button>
+                      </div>
+
+                      <p className="text-muted-foreground leading-relaxed">
+                        {selectedProviderInfo.instructions ||
+                          "After placing your order, submit your transaction reference or receipt link in the next step to confirm your order immediately."}
+                      </p>
+                    </div>
+                  ) : paymentMethod === "cod" ? (
+                    <div className="mt-4 flex items-start gap-3 rounded-xl bg-surface-container/70 p-3.5 text-xs">
+                      <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+                      <p className="text-muted-foreground">
+                        <strong className="text-primary">Cash / POS on Delivery:</strong> Orders remain
+                        in <code className="font-mono">PendingPayment</code> until collected by courier
+                        or confirmed via admin review.
+                      </p>
+                    </div>
+                  ) : null}
                 </section>
               </div>
 
@@ -714,8 +882,11 @@ export function CheckoutView() {
                         <div className="flex size-18 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-media p-1.5">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
-                            src={item.image}
+                            src={getThumbnailImageUrl(item.image)}
                             alt={item.productName}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                            }}
                             className="size-full object-contain"
                           />
                         </div>
@@ -750,7 +921,7 @@ export function CheckoutView() {
                     {totals.discountETB > 0 ? (
                       <div className="flex justify-between font-semibold text-cta">
                         <span className="flex items-center gap-1">
-                          <Tag className="size-3.5" /> Promo ({totals.activePromo?.code})
+                          <Tag className="size-3.5" /> Promo ({activePromo?.code})
                         </span>
                         <span>-{formatETB(totals.discountETB)}</span>
                       </div>
@@ -785,11 +956,15 @@ export function CheckoutView() {
                       className="h-13 w-full text-sm uppercase tracking-wider"
                     >
                       <ShoppingBag className="size-4" />
-                      <span>Confirm &amp; Place Order</span>
+                      <span>
+                        {paymentMethod === "cod"
+                          ? "Place Order (Cash on Delivery)"
+                          : "Place Order"}
+                      </span>
                     </Button>
                     <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                      By placing this order you agree to AddisGebeya&apos;s delivery &amp; 7-day
-                      exchange policy.
+                      Orders remain <strong className="text-foreground">PendingPayment</strong> until
+                      transaction verification succeeds.
                     </p>
                   </div>
                 </div>
@@ -827,7 +1002,7 @@ export function CheckoutView() {
                     <span className="size-2.5 animate-pulse rounded-full bg-cta" />
                     <div className="text-xs">
                       <span className="block font-bold text-foreground">
-                        Bole Medhanialem Fulfillment Center
+                        Bole Fulfillment Center
                       </span>
                       <span className="text-muted-foreground">
                         Inventory reserved for checkout

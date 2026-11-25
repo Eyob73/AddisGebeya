@@ -123,6 +123,9 @@ FRONTEND_URL=http://localhost:3000
 DATABASE_URL="postgresql://addisgebeya:addisgebeya_dev@localhost:5432/addisgebeya_dev?schema=public"
 JWT_ACCESS_SECRET="replace-with-a-strong-random-secret"
 JWT_REFRESH_SECRET="replace-with-a-strong-random-secret"
+CLOUDINARY_CLOUD_NAME=Root
+CLOUDINARY_API_KEY=368673597326217
+CLOUDINARY_API_SECRET=7T3NWgGXFnDkpavuTzZoKqO0vu4
 ```
 
 ## Development Commands
@@ -167,15 +170,15 @@ pnpm db:seed       # Run database seed foundation
 pnpm db:studio     # Open Prisma Studio
 ```
 
-## API Health-Check Endpoint
+## API Health-Check & Documentation Endpoints
 
 Verify that the backend and database connection are operational:
 
-```http
-GET http://localhost:5000/api/v1/health
-```
+- **Health Status:** `GET http://localhost:5000/api/v1/health`
+- **Swagger UI Interactive Documentation:** `GET http://localhost:5000/api/v1/docs` or `http://localhost:5000/docs`
+- **OpenAPI 3.0 JSON Specification:** `GET http://localhost:5000/api/v1/docs.json`
 
-Example response:
+Example Health Response:
 
 ```json
 {
@@ -187,12 +190,86 @@ Example response:
     "version": "v1",
     "environment": "development",
     "uptimeSeconds": 12,
-    "timestamp": "2026-11-18T08:35:00.000Z",
+    "timestamp": "2026-11-23T18:35:00.000Z",
     "database": {
       "status": "connected",
       "latencyMs": 3
     }
   },
-  "timestamp": "2026-11-18T08:35:00.000Z"
+  "timestamp": "2026-11-23T18:35:00.000Z"
 }
 ```
+
+## Security & Payment Testing
+
+Execute the comprehensive automated test suites against the database:
+
+```bash
+# 18 end-to-end authentication, authorization, and RBAC security tests
+pnpm --filter @addisgebeya/api test:e2e
+
+# 14 end-to-end Cloudinary image upload, replacement, deletion, and validation tests
+pnpm --filter @addisgebeya/api test:cloudinary
+
+# 17 end-to-end profile, avatar, password, address, order history & account deletion tests
+pnpm --filter @addisgebeya/api exec tsx test-profile-e2e.ts
+
+# 14 end-to-end Cheki API payment verification, anti-fraud, concurrency & admin review tests
+pnpm --filter @addisgebeya/api test:payments
+
+# Full integration flow (catalog, persistent cart/wishlist, transactional order & stock decrement, Telebirr payment, admin dashboard)
+pnpm --filter @addisgebeya/api exec tsx test-flow.ts
+```
+
+## Customer Profile & Account Management
+
+The platform includes a dedicated, database-driven customer account management portal:
+- **Profile Dashboard (`/account`):** Live customer overview, account status badges, lifetime order count, recent orders preview, default delivery destination, and security shortcuts.
+- **Personal Information (`/account/profile`):** First/last name, email change with collision verification, phone number, birthdate, preferred EU shoe size, and sub-city.
+- **Avatar Management (`POST /api/v1/auth/avatar`):** Image upload, Unsplash preset avatar picker, and instant state synchronization across the navigation bar and profile header.
+- **Change Password (`/account/security`):** Secure current-password verification, strong password requirements (min 8 chars), real-time password strength meter, password reuse prevention, and immediate invalidation of prior refresh tokens.
+- **Address Management (`/account/addresses`):** Full CRUD for multiple delivery destinations with labels (`Home`, `Office`, `Other`), Addis Ababa sub-cities, Woreda, street address, delivery landmark/instructions, and single-default address enforcement. Order snapshots preserve delivery history.
+- **Account Settings (`/account/settings`):** Email verification badges, multi-device session management ("Logout this device" vs "Logout all devices" revoking all refresh tokens), and Danger Zone soft-deletion (`isActive: false`) with password confirmation.
+- **Order History (`/account/orders`):** Order list with status badges, pagination, item counts, ETB pricing, and detailed order receipt inspection with cross-customer ownership isolation.
+
+## Ethiopian Payment Gateway Architecture
+
+The platform provides real-time bank & wallet verification via the **Cheki API** alongside Cash on Delivery (COD). See [docs/CHEKI_PAYMENT_INTEGRATION.md](docs/CHEKI_PAYMENT_INTEGRATION.md) for the complete architecture, endpoints, and verification rules.
+- **Cheki Live Verification (`/api/payment/verify`, `/api/payment/providers`, `/api/payment/status/:orderId`):** Backend-proxied receipt validation for CBE, Telebirr, Bank of Abyssinia, Dashen, Awash, CBE Birr, M-Pesa, Siinqee, Wegagen, Bunna, ZamZam, and eBirr.
+- **Admin Payment Console (`/admin/payments`, `/api/admin/payments`, `/api/admin/payment-providers`):** Inspect flagged transactions, review audit logs, perform reason-logged manual approvals/rejections, and configure receiving bank/wallet accounts.
+- **Cash on Delivery (COD):** Bole Hub doorstep try-on with cash or domestic POS on delivery.
+
+## Cloudinary Media & Image Storage Architecture
+
+Centralized, secure media storage using official Cloudinary SDK with binary content validation and optimized responsive delivery:
+
+### Media Folders
+- `addisgebeya/products/` — Product hero and perspective photography
+- `addisgebeya/categories/` — Category banners and covers
+- `addisgebeya/profiles/` — Customer and staff profile avatars
+- `addisgebeya/banners/` — Promotional and promotional hero slides
+
+### Validation & Limits
+- Allowed formats: **JPEG**, **JPG**, **PNG**, **WebP**
+- Content validation: Binary magic bytes inspection (preventing file extension spoofing)
+- File size limit: **5 MB** per image
+- Product limit: **8 images** per shoe model
+- Authorization: Restricted to authenticated **ADMIN** users
+
+### Image REST Endpoints
+| Method | Route | Description |
+| --- | --- | --- |
+| `POST` | `/api/products/:id/images` | Upload single or multiple images (`multipart/form-data`) |
+| `GET` | `/api/products/:id/images` | List all images for product ordered by primary & displayOrder |
+| `PUT` | `/api/products/:id/images/:imageId` | Replace an existing image asset with a new upload |
+| `DELETE` | `/api/products/:id/images/:imageId` | Delete image from Cloudinary & DB (promotes new primary if needed) |
+| `PATCH` | `/api/products/:id/images/:imageId/primary` | Designate an image as the product hero/primary |
+| `PUT` | `/api/products/:id/images/reorder` | Batch reorder image positions |
+
+### On-the-Fly Dynamic Delivery Transformations
+- **Product Cards & Catalog Grid:** `500x500` fill (`w_500,h_500,c_fill,q_auto,f_auto`)
+- **Product Detail Gallery Hero & Zoom:** `1000x1000` fill (`w_1000,h_1000,c_fill,q_auto,f_auto`)
+- **Thumbnails (Cart, Checkout, Gallery Bar):** `150x150` fill (`w_150,h_150,c_fill,q_auto,f_auto`)
+- **Error Fallback:** Automatic client fallback (`DEFAULT_FALLBACK_IMAGE`) on load failure
+
+

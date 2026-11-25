@@ -9,4 +9,6 @@ allowBuilds:
   esbuild: true
   prisma: true
   sharp: true
+  tesseract.js: true
   unrs-resolver: true
+  "@scarf/scarf": false

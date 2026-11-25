@@ -30,13 +30,13 @@ export function CategoryCard({ category, index = 0, className }: CategoryCardPro
         className={cn(
           "absolute inset-0 bg-gradient-to-t to-transparent",
           isAlternate
-            ? "from-[#11202B]/95 via-[#11202B]/45"
-            : "from-[#00414F]/95 via-[#00414F]/40",
+            ? "from-[#0F172A]/95 via-[#0F172A]/45"
+            : "from-[#0A1529]/95 via-[#0A1529]/40",
         )}
       />
 
       <div className="relative z-10 text-white">
-        <span className="font-label text-[11px] font-bold tracking-widest text-[#B0ECFF] uppercase">
+        <span className="font-label text-[11px] font-bold tracking-widest text-banner-accent uppercase">
           {category.eyebrow}
         </span>
         <div className="mt-1 flex items-center justify-between gap-2">

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Award, CheckCircle2, MapPin, ShieldCheck, Truck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { HERO_ASSETS } from "@/data/mock-footwear";
 
 export const metadata: Metadata = {
@@ -105,11 +106,11 @@ export default function AboutPage() {
       <section className="w-full bg-surface-low py-16">
         <div className="mx-auto grid max-w-[1360px] grid-cols-1 items-center gap-8 px-4 lg:grid-cols-12 lg:px-8">
           <div className="flex items-center gap-5 rounded-2xl border border-border bg-surface p-6 shadow-card lg:col-span-7">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={HERO_ASSETS.ownerAvatar}
+            <UserAvatar
+              name="Kidus Assefa"
               alt="Kidus Assefa — Founder of AddisGebeya Shoes"
-              className="size-24 shrink-0 rounded-2xl object-cover shadow-md sm:size-28"
+              roundedClassName="rounded-2xl"
+              className="size-24 text-2xl shadow-md sm:size-28"
             />
             <div className="space-y-2">
               <Badge variant="soft">Founder &amp; Sole Proprietor</Badge>
@@ -123,18 +124,18 @@ export default function AboutPage() {
           </div>
 
           <div className="space-y-3 rounded-2xl bg-primary-deep p-6 text-white shadow-xl lg:col-span-5">
-            <div className="flex items-center gap-2 text-[#B0ECFF]">
+            <div className="flex items-center gap-2 text-banner-accent">
               <MapPin className="size-5" />
               <span className="font-label text-xs font-bold uppercase tracking-wider">
                 Bole Flagship Studio
               </span>
             </div>
-            <h3 className="font-display text-xl font-bold">Bole Medhanialem Mall, 2nd Floor</h3>
-            <p className="text-xs leading-relaxed text-[#EBF6F8]/85">
+            <h3 className="font-display text-xl font-bold">Bole, Addis Ababa</h3>
+            <p className="text-xs leading-relaxed text-banner-muted/85">
               Walk in for gait sizing advice, complimentary 7-day exchanges, or same-day online
               order pickup. Open daily 8:30 AM – 8:30 PM EAT.
             </p>
-            <div className="flex flex-wrap gap-3 pt-1 font-label text-xs text-[#FFDBD0]">
+            <div className="flex flex-wrap gap-3 pt-1 font-label text-xs text-banner-warm">
               <span className="flex items-center gap-1">
                 <CheckCircle2 className="size-3.5" /> Free Foot Measurement
               </span>

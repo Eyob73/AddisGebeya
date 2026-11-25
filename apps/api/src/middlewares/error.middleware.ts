@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import multer from "multer";
 import { ZodError } from "zod";
 import type { ApiErrorResponse } from "@addisgebeya/types";
 import { HTTP_STATUS } from "@addisgebeya/shared";
@@ -21,6 +22,20 @@ export function errorMiddleware(
         field: issue.path.join(".") || undefined,
         message: issue.message,
       })),
+      timestamp: new Date().toISOString(),
+    };
+    return res.status(HTTP_STATUS.BAD_REQUEST).json(response);
+  }
+
+  if (err instanceof multer.MulterError || (err as { name?: string })?.name === "MulterError") {
+    const multerErr = err as multer.MulterError;
+    const isOversized = multerErr.code === "LIMIT_FILE_SIZE";
+    const response: ApiErrorResponse = {
+      success: false,
+      message: isOversized
+        ? "File size exceeds limit. Maximum allowed size is 5 MB per image."
+        : `Upload error: ${multerErr.message}`,
+      code: multerErr.code,
       timestamp: new Date().toISOString(),
     };
     return res.status(HTTP_STATUS.BAD_REQUEST).json(response);

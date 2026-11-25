@@ -40,7 +40,7 @@ export function DashboardStatCard({
         <span
           className={cn(
             "flex size-10 items-center justify-center rounded-full",
-            accent === "cta" ? "bg-[#FFDBD0] text-cta" : "bg-primary-light text-primary",
+            accent === "cta" ? "bg-cta-light text-cta-text" : "bg-primary-light text-primary",
           )}
         >
           <Icon className="size-5" aria-hidden="true" />

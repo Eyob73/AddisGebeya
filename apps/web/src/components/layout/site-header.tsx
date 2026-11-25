@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { SearchBar } from "@/components/shared/search-bar";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { useAuthStore } from "@/stores/auth.store";
 import { computeCartTotals, useCartStore } from "@/stores/cart.store";
 import { useCatalogStore } from "@/stores/catalog.store";
@@ -44,6 +45,42 @@ export function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [accountOpen, setAccountOpen] = React.useState(false);
+  const accountDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Close dropdown on route change
+  React.useEffect(() => {
+    setAccountOpen(false);
+  }, [pathname]);
+
+  // Handle click outside and Escape key to close account dropdown
+  React.useEffect(() => {
+    if (!accountOpen) return;
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (
+        accountDropdownRef.current &&
+        !accountDropdownRef.current.contains(event.target as Node)
+      ) {
+        setAccountOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAccountOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [accountOpen]);
 
   const { isMobileMenuOpen, toggleMobileMenu, closeMobileMenu, theme, toggleTheme, addToast } =
     useUiStore();
@@ -79,8 +116,8 @@ export function SiteHeader() {
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
-  const handleSignOut = () => {
-    logout();
+  const handleSignOut = async () => {
+    await logout();
     setAccountOpen(false);
     closeMobileMenu();
     addToast({ title: "Signed out", description: "You have been signed out safely." });
@@ -90,7 +127,7 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 w-full shadow-[0_1px_10px_rgba(17,32,43,0.05)]">
       {/* Top Announcement Strip */}
-      <div className="bg-primary-hover text-[#EBF6F8] font-label text-[11px] sm:text-xs py-1.5 px-4 lg:px-8">
+      <div className="bg-primary-deep text-banner-muted font-label text-[11px] sm:text-xs py-1.5 px-4 lg:px-8">
         <div className="mx-auto flex max-w-[1360px] flex-col items-center justify-between gap-1 sm:flex-row">
           <div className="flex items-center gap-2 text-center sm:text-left">
             <span className="inline-block size-2 shrink-0 rounded-full bg-cta" />
@@ -103,13 +140,15 @@ export function SiteHeader() {
             <Link href="/contact" className="hover:text-white transition-colors">
               Contact
             </Link>
-            <Link
-              href="/admin"
-              className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 font-bold text-white hover:bg-white/20 transition-colors"
-            >
-              <LayoutDashboard className="size-3" />
-              Store Admin
-            </Link>
+            {user?.role === "admin" ? (
+              <Link
+                href="/admin"
+                className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 font-bold text-white hover:bg-white/20 transition-colors"
+              >
+                <LayoutDashboard className="size-3" />
+                Store Admin
+              </Link>
+            ) : null}
             <span className="inline-flex items-center gap-1 font-bold text-white">
               <Phone className="size-3.5" />
               {settings.phone}
@@ -139,7 +178,7 @@ export function SiteHeader() {
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-label text-xs font-semibold transition-all whitespace-nowrap",
                     active
-                      ? "bg-primary text-primary-foreground font-bold shadow-[0_2px_8px_rgba(14,90,107,0.18)]"
+                      ? "bg-primary text-primary-foreground font-bold shadow-sm"
                       : "text-muted-foreground hover:bg-primary-light hover:text-primary",
                   )}
                 >
@@ -148,7 +187,7 @@ export function SiteHeader() {
                     <span
                       className={cn(
                         "size-1.5 rounded-full",
-                        active ? "bg-[#FFDBD0]" : "bg-cta",
+                        active ? "bg-banner-warm" : "bg-cta",
                       )}
                     />
                   ) : null}
@@ -206,68 +245,103 @@ export function SiteHeader() {
             </Link>
 
             {/* Account Dropdown */}
-            <div className="relative hidden md:block">
+            <div ref={accountDropdownRef} className="relative hidden md:block">
               {isAuthenticated && user ? (
                 <>
                   <button
                     type="button"
                     onClick={() => setAccountOpen((prev) => !prev)}
-                    onBlur={() => setTimeout(() => setAccountOpen(false), 180)}
+                    aria-expanded={accountOpen}
+                    aria-haspopup="menu"
+                    aria-label="User account menu"
                     className="flex items-center gap-2 rounded-full border border-border/70 bg-surface py-1 pr-2.5 pl-1.5 hover:border-primary transition-colors cursor-pointer"
                   >
-                    {user.avatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={user.avatarUrl}
-                        alt={user.name}
-                        className="size-7 rounded-full object-cover"
-                      />
-                    ) : (
-                      <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                        {user.name.slice(0, 1).toUpperCase()}
-                      </span>
-                    )}
+                    <UserAvatar
+                      src={user.avatarUrl}
+                      name={user.name}
+                      alt={user.name}
+                      className="size-7 text-xs"
+                    />
                     <span className="max-w-[90px] truncate font-label text-xs font-bold text-foreground">
                       {user.name.split(" ")[0]}
                     </span>
-                    <ChevronDown className="size-3.5 text-muted-foreground" />
+                    <ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform duration-200", accountOpen && "rotate-180")} />
                   </button>
 
                   {accountOpen ? (
-                    <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-border bg-surface p-1.5 shadow-xl">
-                      <div className="border-b border-border/70 px-3 py-2">
-                        <p className="truncate text-xs font-bold text-foreground">{user.name}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">{user.email}</p>
+                    <div
+                      role="menu"
+                      aria-orientation="vertical"
+                      className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-border bg-surface p-1.5 shadow-xl z-50 animate-in fade-in-0 zoom-in-95 duration-150"
+                    >
+                      <div className="flex items-center gap-2.5 border-b border-border/70 px-3 py-2">
+                        <UserAvatar
+                          src={user.avatarUrl}
+                          name={user.name}
+                          alt={user.name}
+                          className="size-8 text-xs"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-foreground">{user.name}</p>
+                          <p className="truncate text-[11px] text-muted-foreground">{user.email}</p>
+                        </div>
                       </div>
                       <Link
                         href="/account"
-                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary"
+                        onClick={() => setAccountOpen(false)}
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary transition-colors"
                       >
-                        <User className="size-4" /> Customer Dashboard
+                        <User className="size-4" /> Overview Dashboard
+                      </Link>
+                      <Link
+                        href="/account/profile"
+                        onClick={() => setAccountOpen(false)}
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary transition-colors"
+                      >
+                        <User className="size-4" /> Personal Information
+                      </Link>
+                      <Link
+                        href="/account/addresses"
+                        onClick={() => setAccountOpen(false)}
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary transition-colors"
+                      >
+                        <Truck className="size-4" /> Delivery Addresses
                       </Link>
                       <Link
                         href="/account/orders"
-                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary"
+                        onClick={() => setAccountOpen(false)}
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary transition-colors"
                       >
                         <Package className="size-4" /> Order History
                       </Link>
                       <Link
                         href="/account/tracking"
-                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary"
+                        onClick={() => setAccountOpen(false)}
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary transition-colors"
                       >
                         <Truck className="size-4" /> Track Order
                       </Link>
                       <Link
-                        href="/admin"
-                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-primary hover:bg-primary-light"
+                        href="/wishlist"
+                        onClick={() => setAccountOpen(false)}
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary transition-colors"
                       >
-                        <LayoutDashboard className="size-4" /> Store Owner Admin
+                        <Heart className="size-4" /> Saved Wishlist
                       </Link>
+                      {user.role === "admin" ? (
+                        <Link
+                          href="/admin"
+                          onClick={() => setAccountOpen(false)}
+                          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-primary hover:bg-primary-light transition-colors"
+                        >
+                          <LayoutDashboard className="size-4" /> Store Owner Admin
+                        </Link>
+                      ) : null}
                       <div className="my-1 h-px bg-border/70" />
                       <button
                         type="button"
-                        onMouseDown={handleSignOut}
-                        className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-destructive hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer"
+                        onClick={handleSignOut}
+                        className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-destructive hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer transition-colors"
                       >
                         <LogOut className="size-4" /> Sign Out
                       </button>
@@ -333,11 +407,25 @@ export function SiteHeader() {
                 <User className="size-4 text-primary" /> My Account
               </Link>
               <Link
+                href="/account/orders"
+                onClick={closeMobileMenu}
+                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-foreground"
+              >
+                <Package className="size-4 text-primary" /> Order History
+              </Link>
+              <Link
                 href="/account/tracking"
                 onClick={closeMobileMenu}
                 className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-foreground"
               >
                 <Truck className="size-4 text-primary" /> Track Order
+              </Link>
+              <Link
+                href="/wishlist"
+                onClick={closeMobileMenu}
+                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-foreground"
+              >
+                <Heart className="size-4 text-primary" /> Wishlist
               </Link>
               <Link
                 href="/about"
@@ -353,13 +441,15 @@ export function SiteHeader() {
               >
                 Contact Us
               </Link>
-              <Link
-                href="/admin"
-                onClick={closeMobileMenu}
-                className="col-span-2 flex items-center justify-center gap-2 rounded-full bg-primary py-2.5 font-label font-bold text-primary-foreground"
-              >
-                <LayoutDashboard className="size-4" /> Store Owner Admin Dashboard
-              </Link>
+              {user?.role === "admin" ? (
+                <Link
+                  href="/admin"
+                  onClick={closeMobileMenu}
+                  className="col-span-2 flex items-center justify-center gap-2 rounded-full bg-primary py-2.5 font-label font-bold text-primary-foreground"
+                >
+                  <LayoutDashboard className="size-4" /> Store Owner Admin Dashboard
+                </Link>
+              ) : null}
               <div className="col-span-2 flex items-center justify-between pt-1">
                 <button
                   type="button"

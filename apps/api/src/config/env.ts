@@ -8,6 +8,12 @@ const envSchema = z.object({
   DATABASE_URL: z.string().optional().default(""),
   JWT_ACCESS_SECRET: z.string().min(16).optional(),
   JWT_REFRESH_SECRET: z.string().min(16).optional(),
+  CLOUDINARY_URL: z.string().optional().default(""),
+  CLOUDINARY_CLOUD_NAME: z.string().optional().default(""),
+  CLOUDINARY_API_KEY: z.string().optional().default(""),
+  CLOUDINARY_API_SECRET: z.string().optional().default(""),
+  CHEKI_API_BASE_URL: z.string().url().default("https://cheki.et"),
+  CHEKI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(65000),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -37,6 +43,12 @@ export const env = Object.freeze({
   databaseUrl: data.DATABASE_URL,
   jwtAccessSecret: data.JWT_ACCESS_SECRET ?? "",
   jwtRefreshSecret: data.JWT_REFRESH_SECRET ?? "",
+  cloudinaryUrl: data.CLOUDINARY_URL,
+  cloudinaryCloudName: data.CLOUDINARY_CLOUD_NAME,
+  cloudinaryApiKey: data.CLOUDINARY_API_KEY,
+  cloudinaryApiSecret: data.CLOUDINARY_API_SECRET,
+  chekiApiBaseUrl: data.CHEKI_API_BASE_URL.replace(/\/+$/, ""),
+  chekiTimeoutMs: data.CHEKI_TIMEOUT_MS,
 });
 
 export type AppEnv = typeof env;

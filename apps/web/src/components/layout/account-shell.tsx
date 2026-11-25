@@ -3,16 +3,21 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Heart, LogOut, Package, ShoppingBag, Truck, User } from "lucide-react";
+import { Heart, Lock, LogOut, MapPin, Package, Settings, ShoppingBag, Truck, User, UserCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { useAuthStore } from "@/stores/auth.store";
 import { useUiStore } from "@/stores/ui.store";
 import { cn } from "@/lib/utils";
 
 const ACCOUNT_LINKS = [
-  { href: "/account", label: "Dashboard Overview", icon: User, exact: true },
-  { href: "/account/orders", label: "Order History", icon: Package },
+  { href: "/account", label: "Overview", icon: User, exact: true },
+  { href: "/account/profile", label: "Personal Information", icon: UserCheck },
+  { href: "/account/security", label: "Change Password", icon: Lock },
+  { href: "/account/addresses", label: "My Addresses", icon: MapPin },
+  { href: "/account/orders", label: "My Orders", icon: Package },
   { href: "/account/tracking", label: "Order Tracking", icon: Truck },
+  { href: "/account/settings", label: "Account Settings", icon: Settings },
   { href: "/wishlist", label: "Saved Wishlist", icon: Heart },
   { href: "/cart", label: "Shopping Bag", icon: ShoppingBag },
 ];
@@ -43,18 +48,12 @@ export function AccountShell({ title, subtitle, children }: AccountShellProps) {
         </div>
         {user ? (
           <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-card">
-            {user.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={user.avatarUrl}
-                alt={user.name}
-                className="size-10 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex size-10 items-center justify-center rounded-full bg-primary font-display text-sm font-bold text-primary-foreground">
-                {user.name.slice(0, 2).toUpperCase()}
-              </div>
-            )}
+            <UserAvatar
+              src={user.avatarUrl}
+              name={user.name}
+              alt={user.name}
+              className="size-10 text-sm"
+            />
             <div>
               <p className="text-sm font-bold text-foreground">{user.name}</p>
               <p className="text-xs text-muted-foreground">

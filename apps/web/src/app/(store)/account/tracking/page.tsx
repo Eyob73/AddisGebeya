@@ -2,34 +2,77 @@
 
 import * as React from "react";
 import { Suspense } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, Circle, MapPin, Phone, Search, ShieldCheck, Truck } from "lucide-react";
 import { AccountShell } from "@/components/layout/account-shell";
+import { OrderTrackingPageSkeleton } from "@/components/shared/page-skeletons";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useCatalogStore } from "@/stores/catalog.store";
+import {
+  getPaymentBadgeVariant,
+  isPaymentSettledStatus,
+} from "@/features/payment/payment-verification-panel";
+import { useOrdersQuery } from "@/hooks/use-store-queries";
+import { storeService } from "@/services/store.service";
+import type { OrderRecord } from "@/types/store.types";
 import { formatETB } from "@/utils/format";
 import { cn } from "@/lib/utils";
 
 function OrderTrackingInner() {
+  const isMounted = useIsMounted();
   const searchParams = useSearchParams();
-  const orders = useCatalogStore((s) => s.orders);
-  const queryOrder = searchParams.get("order") ?? orders[0]?.id ?? "AG-9482";
+  const { data: orders = [] } = useOrdersQuery();
+  const queryOrder = searchParams.get("order") ?? orders[0]?.id ?? "";
 
   const [manualOrderId, setManualOrderId] = React.useState<string | null>(null);
   const activeOrderId = manualOrderId ?? queryOrder;
   const [lookupInput, setLookupInput] = React.useState(activeOrderId);
+  const normalizedLookup = activeOrderId.replace(/^#/, "").trim().toUpperCase();
+  const localMatchedOrder = React.useMemo(
+    () =>
+      normalizedLookup
+        ? orders.find((o) => o.id.toUpperCase() === normalizedLookup) ?? null
+        : null,
+    [orders, normalizedLookup],
+  );
+  const [remoteOrder, setRemoteOrder] = React.useState<OrderRecord | null>(null);
 
-  const activeOrder = React.useMemo(() => {
-    const normalized = activeOrderId.replace(/^#/, "").trim().toUpperCase();
-    return orders.find((o) => o.id.toUpperCase() === normalized) ?? null;
-  }, [orders, activeOrderId]);
+  React.useEffect(() => {
+    if (!normalizedLookup || localMatchedOrder) return;
+    let cancelled = false;
+    storeService
+      .getOrderById(normalizedLookup)
+      .then((order) => {
+        if (!cancelled) setRemoteOrder(order);
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteOrder(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedLookup, localMatchedOrder]);
+
+  const activeOrder = localMatchedOrder ?? remoteOrder;
 
   const handleLookup = (e: React.FormEvent) => {
     e.preventDefault();
     setManualOrderId(lookupInput);
   };
+
+  if (!isMounted) {
+    return (
+      <AccountShell
+        title="Live Order Tracking"
+        subtitle="Enter your AddisGebeya order ID to inspect real-time Bole hub packaging and courier dispatch status."
+      >
+        <OrderTrackingPageSkeleton />
+      </AccountShell>
+    );
+  }
 
   return (
     <AccountShell
@@ -99,9 +142,24 @@ function OrderTrackingInner() {
                     #{activeOrder.id}
                   </h2>
                 </div>
-                <Badge variant={activeOrder.status === "delivered" ? "success" : "cta"}>
-                  {activeOrder.status.replace(/_/g, " ")}
-                </Badge>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge
+                    variant={
+                      activeOrder.status.toLowerCase() === "delivered"
+                        ? "success"
+                        : activeOrder.status === "PendingPayment"
+                          ? "warning"
+                          : activeOrder.status.toLowerCase() === "cancelled"
+                            ? "destructive"
+                            : "cta"
+                    }
+                  >
+                    {activeOrder.status.replace(/_/g, " ")}
+                  </Badge>
+                  <Badge variant={getPaymentBadgeVariant(activeOrder.paymentStatus)}>
+                    Payment: {activeOrder.paymentStatus.replace(/_/g, " ")}
+                  </Badge>
+                </div>
               </div>
 
               <ol className="relative space-y-6 border-l-2 border-surface-container pl-6">
@@ -146,6 +204,53 @@ function OrderTrackingInner() {
 
             {/* Dispatch Info & Items (5 cols) */}
             <div className="space-y-5 xl:col-span-5">
+              {!isPaymentSettledStatus(activeOrder.paymentStatus) &&
+                activeOrder.paymentMethod !== "cod" &&
+                activeOrder.paymentStatus !== "cod_due" &&
+                activeOrder.status.toLowerCase() !== "cancelled" && (
+                  <div className="space-y-2.5 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-5 shadow-card">
+                    <div className="flex items-start gap-2.5">
+                      <ShieldCheck className="mt-0.5 size-5 shrink-0 text-amber-700 dark:text-amber-300" />
+                      <div className="space-y-1">
+                        <p className="font-display text-sm font-bold text-foreground">
+                          {activeOrder.receiptStatus === "Pending" ||
+                          activeOrder.receiptStatus === "Processing"
+                            ? "Receipt Verification in Progress"
+                            : activeOrder.receiptStatus === "Manual Review"
+                              ? "Receipt in Manual Review"
+                              : activeOrder.receiptStatus === "Rejected"
+                                ? "Receipt Rejected — Replacement Needed"
+                                : "Payment Verification Required"}
+                        </p>
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          {activeOrder.receiptStatus === "Pending" ||
+                          activeOrder.receiptStatus === "Processing"
+                            ? "Your payment receipt is being verified."
+                            : activeOrder.receiptStatus === "Manual Review"
+                              ? "Automatic verification requires administrator inspection or a corrected transaction reference."
+                              : activeOrder.receiptStatus === "Rejected" &&
+                                  activeOrder.latestReceiptRejectionReason
+                                ? `Reason: ${activeOrder.latestReceiptRejectionReason}`
+                                : `Your order remains in ${activeOrder.status} until payment of ${formatETB(activeOrder.totalETB)} is verified.`}
+                        </p>
+                      </div>
+                    </div>
+                    <Button asChild variant="cta" size="sm" className="w-full">
+                      <Link href={`/checkout?order=${encodeURIComponent(activeOrder.id)}`}>
+                        <ShieldCheck className="size-4" />{" "}
+                        {activeOrder.receiptStatus === "Rejected"
+                          ? "Upload Replacement Receipt"
+                          : activeOrder.receiptStatus === "Manual Review"
+                            ? "Retry Verification / Review"
+                            : activeOrder.receiptStatus === "Pending" ||
+                                activeOrder.receiptStatus === "Processing"
+                              ? "View Receipt Status"
+                              : "Upload Receipt / Verify Payment"}
+                      </Link>
+                    </Button>
+                  </div>
+                )}
+
               <div className="space-y-3 rounded-2xl border border-border bg-surface p-5 shadow-card">
                 <h3 className="font-display text-base font-bold text-foreground">
                   Dispatch Details
@@ -229,7 +334,16 @@ function OrderTrackingInner() {
 
 export default function OrderTrackingPage() {
   return (
-    <Suspense fallback={<div className="p-12 text-center text-sm text-muted-foreground">Loading order tracking...</div>}>
+    <Suspense
+      fallback={
+        <AccountShell
+          title="Live Order Tracking"
+          subtitle="Enter your AddisGebeya order ID to inspect real-time Bole hub packaging and courier dispatch status."
+        >
+          <OrderTrackingPageSkeleton />
+        </AccountShell>
+      }
+    >
       <OrderTrackingInner />
     </Suspense>
   );

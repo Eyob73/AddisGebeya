@@ -5,13 +5,18 @@ import { useParams } from "next/navigation";
 import { Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { AdminTablePageSkeleton } from "@/components/shared/page-skeletons";
 import { ProductFormView } from "@/features/admin/product-form-view";
-import { useCatalogStore } from "@/stores/catalog.store";
+import { useProductDetailQuery } from "@/hooks/use-store-queries";
 
 export default function AdminEditProductPage() {
   const params = useParams<{ id: string }>();
-  const products = useCatalogStore((s) => s.products);
-  const existing = products.find((p) => p.id === params?.id || p.slug === params?.id);
+  const productId = params?.id ?? "";
+  const { data: existing, isLoading } = useProductDetailQuery(productId);
+
+  if (isLoading) {
+    return <AdminTablePageSkeleton />;
+  }
 
   if (!existing) {
     return (
@@ -28,6 +33,6 @@ export default function AdminEditProductPage() {
     );
   }
 
-  return <ProductFormView existingProduct={existing} />;
+  return <ProductFormView key={existing.id} existingProduct={existing} />;
 }
 

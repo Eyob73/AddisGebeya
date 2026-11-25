@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowRight,
   Bike,
-  CheckCircle2,
   Download,
   FileBarChart,
   ImagePlus,
@@ -21,30 +21,49 @@ import {
   Wallet,
 } from "lucide-react";
 import { DashboardStatCard } from "@/components/shared/dashboard-stat-card";
+import { AdminOverviewSkeleton } from "@/components/shared/page-skeletons";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/dialog";
 import { getColorwayTotalStock, getProductTotalStock } from "@/data/mock-footwear";
-import { useCatalogStore } from "@/stores/catalog.store";
+import {
+  getPaymentBadgeVariant,
+  isPaymentSettledStatus,
+} from "@/features/payment/payment-verification-panel";
+import { getReceiptBadgeVariant } from "@/features/payment/payment-receipt-submission";
+import {
+  useAdminDashboardQuery,
+  useAdminPaymentsQuery,
+  useOrdersQuery,
+  useProductsQuery,
+  useStoreSettingsQuery,
+} from "@/hooks/use-store-queries";
+import { storeService } from "@/services/store.service";
 import { useUiStore } from "@/stores/ui.store";
-import { formatETB } from "@/utils/format";
+import { formatDateShort, formatETB } from "@/utils/format";
 
 const MATRIX_SIZES = [39, 40, 41, 42, 43, 44, 45] as const;
 
 export default function AdminOverviewPage() {
+  const router = useRouter();
+  const { data: dashData, isLoading: loadingDash } = useAdminDashboardQuery();
   const {
-    products,
-    orders,
-    paymentSlips,
-    settings,
-    updateSizeStock,
-    updateOrderStatus,
-    attachSlipToOrder,
-  } = useCatalogStore();
+    data: products = [],
+    isLoading: loadingProducts,
+    refetch: refetchProducts,
+  } = useProductsQuery();
+  const { data: orders = [], isLoading: loadingOrders, refetch: refetchOrders } = useOrdersQuery();
+  const { data: reviewPaymentsData } = useAdminPaymentsQuery({
+    status: "ReviewRequired",
+    limit: 4,
+  });
+  const { data: settings } = useStoreSettingsQuery();
+
   const addToast = useUiStore((s) => s.addToast);
 
   const [txCode, setTxCode] = React.useState("");
-  const [verifyMessage, setVerifyMessage] = React.useState<string | null>(null);
+  const isMounted = useIsMounted();
   const [restockTarget, setRestockTarget] = React.useState<{
     productId: string;
     colorwayId: string;
@@ -52,15 +71,26 @@ export default function AdminOverviewPage() {
     colorwayName: string;
   } | null>(null);
 
-  const totalRevenueETB = React.useMemo(
-    () => 816350 + orders.reduce((sum, o) => sum + o.totalETB, 0),
-    [orders],
-  );
+  const totalRevenueETB = React.useMemo(() => {
+    if (dashData?.metrics?.totalRevenueETB !== undefined) {
+      return dashData.metrics.totalRevenueETB;
+    }
+    return orders.reduce((sum, o) => sum + o.totalETB, 0);
+  }, [dashData, orders]);
+
+  const totalOrdersCount = React.useMemo(() => {
+    return dashData?.metrics?.totalOrders ?? orders.length;
+  }, [dashData, orders]);
+
   const totalPhysicalPairs = React.useMemo(
     () => products.reduce((sum, p) => sum + getProductTotalStock(p), 0),
     [products],
   );
+
   const criticalSizesCount = React.useMemo(() => {
+    if (dashData?.metrics?.lowStockAlertsCount !== undefined) {
+      return dashData.metrics.lowStockAlertsCount;
+    }
     let count = 0;
     for (const p of products) {
       for (const cw of p.colorways) {
@@ -70,7 +100,7 @@ export default function AdminOverviewPage() {
       }
     }
     return count;
-  }, [products]);
+  }, [dashData, products]);
 
   const activeDispatches = orders.filter(
     (o) => o.status !== "delivered" && o.status !== "cancelled",
@@ -78,18 +108,13 @@ export default function AdminOverviewPage() {
 
   const handleVerifyTx = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleaned = txCode.trim().toUpperCase();
+    const cleaned = txCode.trim();
     if (!cleaned) return;
-    setVerifyMessage(
-      `Reference ${cleaned} logged for verification against Telebirr / CBE ledger.`,
-    );
-    setTxCode("");
-    addToast({
-      title: "Transaction Reference Checked",
-      description: `Reference ${cleaned} matched in local preview ledger.`,
-      variant: "success",
-    });
+    router.push(`/admin/payments?search=${encodeURIComponent(cleaned)}`);
   };
+
+  const pendingReviewPayments = reviewPaymentsData?.items ?? [];
+  const pendingReceiptsCount = reviewPaymentsData?.summary?.pendingReceiptsCount ?? 0;
 
   const handleExportAudit = () => {
     const header = ["Product", "SKU", "Colorway", ...MATRIX_SIZES.map((s) => `EU_${s}`), "Total"];
@@ -120,6 +145,10 @@ export default function AdminOverviewPage() {
     (cw) => cw.id === restockTarget?.colorwayId,
   );
 
+  if (!isMounted || loadingDash || loadingProducts || loadingOrders) {
+    return <AdminOverviewSkeleton />;
+  }
+
   return (
     <div className="space-y-8">
       {/* KPI Grid (Exact Stitch 4-Card Row) */}
@@ -134,7 +163,7 @@ export default function AdminOverviewPage() {
         />
         <DashboardStatCard
           label="Total Orders"
-          value={String(190 + orders.length)}
+          value={String(totalOrdersCount)}
           unit="Orders"
           icon={ShoppingBag}
           subLeft="Repeat Shoppers: 34%"
@@ -142,7 +171,7 @@ export default function AdminOverviewPage() {
         />
         <DashboardStatCard
           label="Catalog & Pairs"
-          value={String(products.length)}
+          value={String(dashData?.metrics?.productsCount ?? products.length)}
           unit="Styles"
           icon={Layers}
           subLeft={`${totalPhysicalPairs} Physical Pairs`}
@@ -150,7 +179,7 @@ export default function AdminOverviewPage() {
         />
         <DashboardStatCard
           label="Dispatches Today"
-          value={String(activeDispatches.length + 15)}
+          value={String(activeDispatches.length)}
           unit="En Route"
           icon={Bike}
           accent="cta"
@@ -302,7 +331,7 @@ export default function AdminOverviewPage() {
         {/* Stock Alert Strip */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-low p-4 text-xs">
           <div className="flex items-center gap-3">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#FFDBD0] text-cta">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-cta-light text-cta-text">
               <Package className="size-4" />
             </span>
             <p className="text-foreground">
@@ -359,14 +388,16 @@ export default function AdminOverviewPage() {
                         • {order.customerName}
                       </span>
                       <Badge
-                        variant={order.paymentStatus === "verified" ? "soft" : "outline"}
+                        variant={getPaymentBadgeVariant(order.paymentStatus)}
                         className="text-[10px]"
                       >
-                        {order.paymentStatus === "verified"
-                          ? `${order.paymentMethod.replace("_", " ")} Verified`
+                        {isPaymentSettledStatus(order.paymentStatus)
+                          ? `${order.paymentMethod.replace("_", " ")} Paid`
                           : order.paymentMethod === "cod"
                             ? "Cash on Delivery"
-                            : "Payment Pending"}
+                            : order.receiptStatus
+                              ? `Receipt ${order.receiptStatus}`
+                              : order.paymentStatus}
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -404,8 +435,13 @@ export default function AdminOverviewPage() {
                     <Button
                       type="button"
                       size="sm"
-                      onClick={() => {
-                        updateOrderStatus(order.id, "out_for_delivery", "Courier Dawit (Bike #07)");
+                      onClick={async () => {
+                        await storeService.updateOrderStatus(
+                          order.id,
+                          "out_for_delivery",
+                          "Courier Dawit (Bike #07)",
+                        );
+                        refetchOrders();
                         addToast({
                           title: `Rider Assigned to #${order.id}`,
                           description: "Courier Dawit (Bike #07) dispatched from Bole Hub.",
@@ -431,21 +467,29 @@ export default function AdminOverviewPage() {
 
         {/* Right: Payment Verifications + Quick Actions + Flagship Card (5 cols) */}
         <div className="space-y-5 lg:col-span-5">
-          {/* Payment Verifications Widget */}
+          {/* Payment Verifications Widget (Live Backend Queue) */}
           <div className="space-y-4 rounded-2xl border border-border bg-surface p-5 shadow-card">
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-base font-bold text-foreground">
-                Payment Verifications
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-display text-base font-bold text-foreground">
+                  Payment Verifications
+                </h3>
+                {pendingReceiptsCount > 0 ? (
+                  <Badge variant="warning" className="text-[10px]">
+                    {pendingReceiptsCount} Pending
+                  </Badge>
+                ) : null}
+              </div>
               <ShieldCheck className="size-5 text-primary" />
             </div>
             <p className="text-xs text-muted-foreground">
-              Match customer SMS Transaction IDs against Telebirr SuperApp and CBE Birr transfers.
+              Inspect submitted payment receipts and lookup Telebirr / CBE transaction references in
+              the live verification queue.
             </p>
 
             <form onSubmit={handleVerifyTx} className="space-y-2">
               <label className="block font-label text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
-                Enter Telebirr / CBE Reference Code
+                Search Order # or Reference Code
               </label>
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
@@ -453,61 +497,64 @@ export default function AdminOverviewPage() {
                     type="text"
                     value={txCode}
                     onChange={(e) => setTxCode(e.target.value)}
-                    placeholder="e.g. TLB8934JKS29..."
+                    placeholder="e.g. AG-1234 or FT2611..."
                     className="h-10 w-full rounded-full border border-border bg-surface-low pr-9 pl-4 text-xs font-semibold text-foreground focus:border-primary focus:outline-none"
                   />
                   <Search className="pointer-events-none absolute top-2.5 right-3 size-4 text-muted-foreground" />
                 </div>
-                <Button type="submit" size="sm">
-                  Verify
+                <Button type="submit" size="sm" disabled={!txCode.trim()}>
+                  Lookup
                 </Button>
               </div>
-              {verifyMessage ? (
-                <div className="flex items-center gap-1.5 rounded-lg bg-primary-light p-2.5 text-xs font-semibold text-primary">
-                  <CheckCircle2 className="size-4 shrink-0" />
-                  <span>{verifyMessage}</span>
-                </div>
-              ) : null}
             </form>
 
-            {/* Unmatched Slips */}
+            {/* Live Pending Receipt & Flagged Payment Queue */}
             <div className="space-y-2 pt-1">
-              <p className="font-label text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
-                Unmatched Incoming Slips ({paymentSlips.length})
-              </p>
-              {paymentSlips.length === 0 ? (
+              <div className="flex items-center justify-between">
+                <p className="font-label text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
+                  Awaiting Review ({pendingReviewPayments.length})
+                </p>
+                <Link
+                  href="/admin/payments"
+                  className="font-label text-[11px] font-bold text-primary hover:underline"
+                >
+                  Open Console &rarr;
+                </Link>
+              </div>
+
+              {pendingReviewPayments.length === 0 ? (
                 <p className="rounded-xl bg-surface-low p-3 text-xs text-muted-foreground">
-                  All incoming Telebirr &amp; CBE slips are reconciled.
+                  No payments or receipts are currently waiting for administrator review.
                 </p>
               ) : (
-                paymentSlips.map((slip) => (
+                pendingReviewPayments.map((payment) => (
                   <div
-                    key={slip.id}
+                    key={payment.id}
                     className="flex items-center justify-between gap-2 rounded-xl bg-surface-low p-3"
                   >
                     <div className="min-w-0">
-                      <p className="truncate font-label text-xs font-bold text-foreground">
-                        {slip.reference} • {formatETB(slip.amountETB)}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="truncate font-label text-xs font-bold text-foreground">
+                          #{payment.orderNumber} • {formatETB(payment.expectedOrderTotalETB)}
+                        </p>
+                        {payment.latestReceipt ? (
+                          <Badge
+                            variant={getReceiptBadgeVariant(payment.latestReceipt.status)}
+                            className="text-[10px]"
+                          >
+                            Receipt: {payment.latestReceipt.status}
+                          </Badge>
+                        ) : null}
+                      </div>
                       <p className="truncate text-[11px] text-muted-foreground">
-                        From: {slip.senderName} ({slip.senderInfo})
+                        {payment.customerName} • {payment.provider.toUpperCase()} •{" "}
+                        {formatDateShort(payment.updatedAt)}
                       </p>
                     </div>
-                    <Button
-                      type="button"
-                      variant="cta"
-                      size="sm"
-                      onClick={() => {
-                        const targetOrderId = orders[0]?.id ?? "AG-9482";
-                        attachSlipToOrder(slip.id, targetOrderId);
-                        addToast({
-                          title: "Payment Slip Matched",
-                          description: `${slip.reference} attached to Order #${targetOrderId}.`,
-                          variant: "success",
-                        });
-                      }}
-                    >
-                      Attach
+                    <Button asChild type="button" variant="cta" size="sm">
+                      <Link href={`/admin/payments?search=${encodeURIComponent(payment.orderNumber)}`}>
+                        Inspect
+                      </Link>
                     </Button>
                   </div>
                 ))
@@ -570,19 +617,19 @@ export default function AdminOverviewPage() {
           {/* Physical Flagship Card */}
           <div className="rounded-2xl bg-primary-deep p-5 text-white shadow-md">
             <div className="mb-2 flex items-center justify-between">
-              <span className="font-label text-[10px] font-bold tracking-wider text-[#B0ECFF] uppercase">
+              <span className="font-label text-[10px] font-bold tracking-wider text-banner-accent uppercase">
                 Physical Flagship Showroom
               </span>
               <span className="rounded-full bg-cta px-2.5 py-0.5 font-label text-[10px] font-bold">
                 Open till 8:30 PM
               </span>
             </div>
-            <h4 className="font-display text-base font-bold">Bole Medhanialem Studio</h4>
-            <p className="mt-1 text-xs text-[#EBF6F8]/85">
+            <h4 className="font-display text-base font-bold">Bole Store</h4>
+            <p className="mt-1 text-xs text-banner-muted/85">
               In-store shoe try-on sessions active. Customer pickup desk operational.
             </p>
-            <div className="mt-4 flex items-center justify-between border-t border-white/15 pt-3 font-label text-[11px] text-[#EBF6F8]">
-              <span>Direct: {settings.phone}</span>
+            <div className="mt-4 flex items-center justify-between border-t border-white/15 pt-3 font-label text-[11px] text-banner-muted">
+              <span>Direct: {settings?.phone ?? "+251 911 234 567"}</span>
               <Link href="/" className="font-bold text-white underline">
                 Storefront →
               </Link>
@@ -611,14 +658,16 @@ export default function AdminOverviewPage() {
                     type="number"
                     min={0}
                     value={restockColorway.stockBySize[sz] ?? 0}
-                    onChange={(e) =>
-                      updateSizeStock(
+                    onChange={async (e) => {
+                      const newQty = Number(e.target.value) || 0;
+                      await storeService.updateSizeStock(
                         restockTarget.productId,
                         restockTarget.colorwayId,
                         sz,
-                        Number(e.target.value) || 0,
-                      )
-                    }
+                        newQty,
+                      );
+                      refetchProducts();
+                    }}
                     className="mt-1.5 h-9 w-full rounded-lg border border-border bg-surface text-center font-mono text-sm font-bold text-foreground focus:border-primary focus:outline-none"
                   />
                 </div>
@@ -630,6 +679,7 @@ export default function AdminOverviewPage() {
                 variant="cta"
                 onClick={() => {
                   setRestockTarget(null);
+                  refetchProducts();
                   addToast({
                     title: "Size Stock Updated",
                     description: "Changes are live on the customer storefront.",

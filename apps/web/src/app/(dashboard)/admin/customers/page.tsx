@@ -7,14 +7,19 @@ import { Button } from "@/components/ui/button";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { ModalDialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { useCatalogStore } from "@/stores/catalog.store";
+import { AdminTablePageSkeleton } from "@/components/shared/page-skeletons";
+import { UserAvatar } from "@/components/shared/user-avatar";
+import { useIsMounted } from "@/hooks/use-is-mounted";
+import { useAdminCustomersQuery, useOrdersQuery } from "@/hooks/use-store-queries";
 import type { CustomerRecord } from "@/types/store.types";
 import { formatDateShort, formatETB } from "@/utils/format";
 
 export default function AdminCustomersPage() {
-  const { customers, orders } = useCatalogStore();
+  const { data: customers = [], isLoading: loadingCustomers } = useAdminCustomersQuery();
+  const { data: orders = [], isLoading: loadingOrders } = useOrdersQuery();
   const [query, setQuery] = React.useState("");
   const [selectedCustomer, setSelectedCustomer] = React.useState<CustomerRecord | null>(null);
+  const isMounted = useIsMounted();
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -43,18 +48,13 @@ export default function AdminCustomersPage() {
       header: "Customer",
       render: (c) => (
         <div className="flex items-center gap-3">
-          {c.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={c.avatarUrl} alt={c.name} className="size-9 rounded-full object-cover" />
-          ) : (
-            <div className="flex size-9 items-center justify-center rounded-full bg-primary-light font-display text-xs font-bold text-primary">
-              {c.name
-                .split(" ")
-                .map((n) => n[0])
-                .join("")
-                .slice(0, 2)}
-            </div>
-          )}
+          <UserAvatar
+            src={c.avatarUrl}
+            name={c.name}
+            alt={c.name}
+            className="size-9 text-xs"
+            blankClassName="bg-primary-light text-primary"
+          />
           <div>
             <p className="font-display text-sm font-bold text-foreground">{c.name}</p>
             <p className="text-xs text-muted-foreground">{c.email}</p>
@@ -122,6 +122,10 @@ export default function AdminCustomersPage() {
     },
   ];
 
+  if (!isMounted || loadingCustomers || loadingOrders) {
+    return <AdminTablePageSkeleton title="Customers" hasCreateButton={false} />;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
@@ -155,6 +159,7 @@ export default function AdminCustomersPage() {
         data={filtered}
         rowKey={(c) => c.id}
         emptyMessage="No customers matched your search."
+        isLoading={!isMounted}
       />
 
       <ModalDialog

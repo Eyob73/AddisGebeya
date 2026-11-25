@@ -8,20 +8,30 @@ import { Button } from "@/components/ui/button";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { ConfirmationDialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { AdminTablePageSkeleton } from "@/components/shared/page-skeletons";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 import { getProductTotalStock } from "@/data/mock-footwear";
-import { useCatalogStore } from "@/stores/catalog.store";
+import { useCategoriesQuery, useProductsQuery } from "@/hooks/use-store-queries";
+import { storeService } from "@/services/store.service";
 import { useUiStore } from "@/stores/ui.store";
 import type { ShoeProduct } from "@/types/store.types";
 import { formatETB } from "@/utils/format";
+import { DEFAULT_FALLBACK_IMAGE, getThumbnailImageUrl } from "@/utils/cloudinary";
 
 export default function AdminProductsPage() {
-  const { products, categories, deleteProduct, updateProduct } = useCatalogStore();
+  const {
+    data: products = [],
+    isLoading: loadingProducts,
+    refetch: refetchProducts,
+  } = useProductsQuery({ status: "all" });
+  const { data: categories = [], isLoading: loadingCategories } = useCategoriesQuery();
   const addToast = useUiStore((s) => s.addToast);
 
   const [query, setQuery] = React.useState("");
   const [categoryFilter, setCategoryFilter] = React.useState("all");
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [pendingDelete, setPendingDelete] = React.useState<ShoeProduct | null>(null);
+  const isMounted = useIsMounted();
 
   const filteredProducts = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -44,8 +54,11 @@ export default function AdminProductsPage() {
           <div className="size-12 shrink-0 overflow-hidden rounded-lg bg-surface-media p-1">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={p.colorways[0]?.images[0]}
+              src={getThumbnailImageUrl(p.colorways[0]?.images[0])}
               alt={p.name}
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+              }}
               className="size-full object-contain"
             />
           </div>
@@ -103,9 +116,10 @@ export default function AdminProductsPage() {
       render: (p) => (
         <button
           type="button"
-          onClick={() => {
+          onClick={async () => {
             const next = p.status === "active" ? "draft" : "active";
-            updateProduct(p.id, { status: next });
+            await storeService.updateProduct(p.id, { status: next });
+            refetchProducts();
             addToast({
               title: "Catalog Status Updated",
               description: `${p.name} is now ${next}.`,
@@ -150,6 +164,10 @@ export default function AdminProductsPage() {
       ),
     },
   ];
+
+  if (!isMounted || loadingProducts || loadingCategories) {
+    return <AdminTablePageSkeleton title="Shoe Models" hasCreateButton={true} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -212,6 +230,7 @@ export default function AdminProductsPage() {
         data={filteredProducts}
         rowKey={(p) => p.id}
         emptyMessage="No shoe models match your filter."
+        isLoading={!isMounted}
       />
 
       <ConfirmationDialog
@@ -221,9 +240,10 @@ export default function AdminProductsPage() {
         confirmLabel="Delete Shoe Model"
         title={`Delete "${pendingDelete?.name}"?`}
         description="This permanently removes the shoe model and its size stock matrix from your store catalog."
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!pendingDelete) return;
-          deleteProduct(pendingDelete.id);
+          await storeService.deleteProduct(pendingDelete.id);
+          refetchProducts();
           addToast({
             title: "Product Deleted",
             description: `${pendingDelete.name} was removed from the catalog.`,

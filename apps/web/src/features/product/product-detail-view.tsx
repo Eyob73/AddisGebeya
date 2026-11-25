@@ -38,16 +38,24 @@ import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, Textarea } from "@/components/ui/input";
+import { HERO_ASSETS } from "@/data/mock-footwear";
 import {
-  HERO_ASSETS,
-  RUNNER_COMMUNITY_PHOTOS,
-} from "@/data/mock-footwear";
-import { useProductDetailQuery, useProductsQuery } from "@/hooks/use-store-queries";
+  useProductDetailQuery,
+  useProductReviewsQuery,
+  useProductsQuery,
+} from "@/hooks/use-store-queries";
+import { storeService } from "@/services/store.service";
 import { useAuthStore } from "@/stores/auth.store";
 import { useCartStore } from "@/stores/cart.store";
 import { useCatalogStore } from "@/stores/catalog.store";
 import { useUiStore } from "@/stores/ui.store";
+import { ProductDetailPageSkeleton } from "@/components/shared/page-skeletons";
 import { cn } from "@/lib/utils";
+import {
+  DEFAULT_FALLBACK_IMAGE,
+  getDetailImageUrl,
+  getThumbnailImageUrl,
+} from "@/utils/cloudinary";
 
 const GALLERY_LABELS = ["Profile", "Side View", "Top Box", "Sole Tread", "Heel Unit", "On-Foot"];
 
@@ -55,9 +63,7 @@ export function ProductDetailView({ slug }: { slug: string }) {
   const router = useRouter();
   const { data: product, isLoading } = useProductDetailQuery(slug);
   const { data: allProducts = [] } = useProductsQuery();
-  const reviews = useCatalogStore((s) => s.reviews);
-  const addReview = useCatalogStore((s) => s.addReview);
-  const markReviewHelpful = useCatalogStore((s) => s.markReviewHelpful);
+  const { data: dbReviews = [], refetch: refetchReviews } = useProductReviewsQuery(product?.id);
   const addItem = useCartStore((s) => s.addItem);
   const addToast = useUiStore((s) => s.addToast);
   const user = useAuthStore((s) => s.user);
@@ -81,8 +87,25 @@ export function ProductDetailView({ slug }: { slug: string }) {
 
   const activeColorway = React.useMemo(() => {
     if (!product) return undefined;
-    return product.colorways.find((c) => c.id === selectedColorId) ?? product.colorways[0];
+    if (selectedColorId) {
+      const explicit = product.colorways.find((c) => c.id === selectedColorId);
+      if (explicit) return explicit;
+    }
+    return (
+      product.colorways.find((c) =>
+        Object.values(c.stockBySize).some((qty) => Number(qty) > 0),
+      ) ?? product.colorways[0]
+    );
   }, [product, selectedColorId]);
+
+  const configuredSizes = React.useMemo(() => {
+    if (!activeColorway) return [];
+    const keys = Object.keys(activeColorway.stockBySize)
+      .map((sz) => Number(sz))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .sort((a, b) => a - b);
+    return keys;
+  }, [activeColorway]);
 
   const availableSizes = React.useMemo(() => {
     if (!activeColorway) return [];
@@ -110,12 +133,11 @@ export function ProductDetailView({ slug }: { slug: string }) {
 
   const productReviews = React.useMemo(() => {
     if (!product) return [];
-    const matched = reviews.filter((r) => r.productId === product.id);
-    const list = matched.length > 0 ? matched : reviews;
+    const list = dbReviews;
     if (reviewFilter === "photos") return list.filter((r) => Boolean(r.photoUrl));
     if (reviewFilter === "five") return list.filter((r) => r.rating === 5);
     return list;
-  }, [product, reviews, reviewFilter]);
+  }, [product, dbReviews, reviewFilter]);
 
   const relatedProducts = React.useMemo(() => {
     if (!product) return [];
@@ -123,11 +145,7 @@ export function ProductDetailView({ slug }: { slug: string }) {
   }, [allProducts, product]);
 
   if (isLoading) {
-    return (
-      <div className="mx-auto max-w-[1360px] px-4 py-16 text-center text-sm text-muted-foreground">
-        Loading footwear specifications...
-      </div>
-    );
+    return <ProductDetailPageSkeleton />;
   }
 
   if (!product || !activeColorway) {
@@ -147,8 +165,17 @@ export function ProductDetailView({ slug }: { slug: string }) {
     );
   }
 
+  const unassignedProductImages =
+    product.productImages?.filter((img) => !img.colorwayId).map((img) => img.imageUrl) ?? [];
+  const allProductImageUrls = product.productImages?.map((img) => img.imageUrl) ?? [];
   const galleryImages =
-    activeColorway.images.length > 0 ? activeColorway.images : [HERO_ASSETS.heroSneaker];
+    activeColorway.images.length > 0
+      ? activeColorway.images
+      : unassignedProductImages.length > 0
+        ? unassignedProductImages
+        : allProductImageUrls.length > 0
+          ? allProductImageUrls
+          : [HERO_ASSETS.heroSneaker];
   const currentHeroImage = galleryImages[activeImageIdx] ?? galleryImages[0];
 
   const handleAddToBag = (buyNow = false) => {
@@ -176,37 +203,36 @@ export function ProductDetailView({ slug }: { slug: string }) {
     }
   };
 
-  const handleReviewSubmit = (e: React.FormEvent) => {
+  const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reviewTitle.trim() || !reviewBody.trim()) return;
+    if (!product || !reviewTitle.trim() || !reviewBody.trim()) return;
     const author = user?.name ?? "Addis Runner";
-    addReview({
-      id: `rev-${Date.now()}`,
-      productId: product.id,
-      authorName: author,
-      authorInitials: author
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase(),
-      location: user?.subCity ? `Addis Ababa, ${user.subCity.split(" ")[0]}` : "Addis Ababa, Bole",
-      purchasedSize: selectedSize ?? 42,
-      rating: reviewRating,
-      title: reviewTitle.trim(),
-      comment: reviewBody.trim(),
-      dateLabel: "Just now",
-      verified: true,
-      helpfulCount: 0,
-    });
-    setReviewTitle("");
-    setReviewBody("");
-    setReviewModalOpen(false);
-    addToast({
-      title: "Review Published",
-      description: "Thank you for sharing your fit experience with AddisGebeya!",
-      variant: "success",
-    });
+    try {
+      await storeService.addReview({
+        productId: product.id,
+        authorName: author,
+        location: user?.subCity ? `Addis Ababa, ${user.subCity.split(" ")[0]}` : "Addis Ababa, Bole",
+        purchasedSize: selectedSize ?? 42,
+        rating: reviewRating,
+        title: reviewTitle.trim(),
+        comment: reviewBody.trim(),
+      });
+      await refetchReviews();
+      setReviewTitle("");
+      setReviewBody("");
+      setReviewModalOpen(false);
+      addToast({
+        title: "Review Published",
+        description: "Thank you for sharing your fit experience with AddisGebeya!",
+        variant: "success",
+      });
+    } catch {
+      addToast({
+        title: "Submission Error",
+        description: "Could not submit review. Please try again.",
+        variant: "error",
+      });
+    }
   };
 
   return (
@@ -215,7 +241,7 @@ export function ProductDetailView({ slug }: { slug: string }) {
       <div className="w-full border-b border-border/70 bg-surface-low px-4 py-2 text-xs lg:px-8">
         <div className="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-muted-foreground">
-            <span className="inline-flex size-5 items-center justify-center rounded-full bg-[#FFDBD0] font-bold text-cta">
+            <span className="inline-flex size-5 items-center justify-center rounded-full bg-cta-light font-bold text-cta-text">
               <Zap className="size-3" />
             </span>
             <span className="font-bold text-foreground">BOLE SPECIAL:</span>
@@ -229,7 +255,7 @@ export function ProductDetailView({ slug }: { slug: string }) {
             </span>
             <span>•</span>
             <span className="inline-flex items-center gap-1">
-              <Truck className="size-3.5" /> Free Shipping 3,500+ ETB
+              <Truck className="size-3.5" /> Free Delivery in Addis Ababa
             </span>
           </div>
         </div>
@@ -259,7 +285,11 @@ export function ProductDetailView({ slug }: { slug: string }) {
             <div className="group relative overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-card">
               {/* Overlay Badges */}
               <div className="absolute top-5 left-5 z-10 flex flex-col items-start gap-1.5">
-                {product.badges[0] ? <Badge variant="cta">{product.badges[0]}</Badge> : null}
+                {product.badges.find((b) => b.trim().toLowerCase() !== "ethiopian made") ? (
+                  <Badge variant="cta">
+                    {product.badges.find((b) => b.trim().toLowerCase() !== "ethiopian made")}
+                  </Badge>
+                ) : null}
                 <Badge variant="default">
                   <ShieldCheck className="size-3" /> 100% Genuine Certified
                 </Badge>
@@ -285,8 +315,11 @@ export function ProductDetailView({ slug }: { slug: string }) {
 
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={currentHeroImage}
+                  src={getDetailImageUrl(currentHeroImage)}
                   alt={`${product.name} — ${activeColorway.name}`}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                  }}
                   className="max-h-[380px] w-4/5 select-none object-contain drop-shadow-[0_24px_34px_rgba(0,65,79,0.18)] transition-transform duration-500 group-hover:scale-105"
                 />
 
@@ -318,8 +351,11 @@ export function ProductDetailView({ slug }: { slug: string }) {
                     <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-surface-low p-1">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={imgUrl}
+                        src={getThumbnailImageUrl(imgUrl)}
                         alt={`${product.name} angle ${idx + 1}`}
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                        }}
                         className="size-full object-contain transition-transform group-hover/thumb:scale-105"
                       />
                     </div>
@@ -347,7 +383,7 @@ export function ProductDetailView({ slug }: { slug: string }) {
                 </div>
               </div>
               <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4 shadow-card">
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#FFDBD0]/60 text-cta">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-cta-light text-cta-text">
                   <Zap className="size-5" />
                 </div>
                 <div>
@@ -378,18 +414,30 @@ export function ProductDetailView({ slug }: { slug: string }) {
           {/* RIGHT COLUMN: Purchase Buy Box (5 cols) */}
           <div className="lg:col-span-5">
             <div className="space-y-5 rounded-2xl border border-border bg-surface p-6 shadow-md sm:p-7">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-label text-xs font-extrabold tracking-widest text-primary uppercase">
-                  {product.brand}
+                  {product.brand} • {product.shoeType || product.categoryName}
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-[#FFDBD0]/70 px-2.5 py-0.5 font-label text-[11px] font-bold text-cta">
-                  <Flame className="size-3.5" /> High Demand
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="soft">{product.gender}</Badge>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-cta-light px-2.5 py-0.5 font-label text-[11px] font-bold text-cta-text">
+                    <Flame className="size-3.5" /> {sizeStock > 0 ? `${sizeStock} in stock` : "High Demand"}
+                  </span>
+                </div>
               </div>
 
               <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
                 {product.name}
               </h1>
+
+              {(product.material || product.specs.materials.length > 0) ? (
+                <p className="font-label text-xs font-medium text-muted-foreground">
+                  Material:{" "}
+                  <span className="font-semibold text-foreground">
+                    {product.material || product.specs.materials.join(" • ")}
+                  </span>
+                </p>
+              ) : null}
 
               <div className="flex flex-wrap items-center gap-3">
                 <Rating rating={product.rating} variant="full" />
@@ -411,10 +459,7 @@ export function ProductDetailView({ slug }: { slug: string }) {
                   showSavingsBadge
                 />
                 <p className="mt-1.5 text-xs text-muted-foreground">
-                  Inclusive of 15% Ethiopian VAT.{" "}
-                  {product.freeAddisDelivery
-                    ? "Qualifies for free express delivery in Addis Ababa."
-                    : "Free delivery on orders over 3,500 ETB."}
+                  Inclusive of 15% Ethiopian VAT. Free delivery across Addis Ababa.
                 </p>
               </div>
 
@@ -458,6 +503,7 @@ export function ProductDetailView({ slug }: { slug: string }) {
 
                 <SizeSelector
                   stockBySize={activeColorway.stockBySize}
+                  sizes={configuredSizes}
                   selectedSize={selectedSize}
                   onSelect={(sz) => {
                     setManualSize(sz);
@@ -537,7 +583,7 @@ export function ProductDetailView({ slug }: { slug: string }) {
                   className="w-full"
                 >
                   <Zap className="size-4" />
-                  <span>Buy Now with Telebirr / CBE / Cash on Delivery</span>
+                  <span>Buy Now</span>
                 </Button>
               </div>
 
@@ -822,29 +868,34 @@ export function ProductDetailView({ slug }: { slug: string }) {
           </div>
 
           {/* Community Runner Photo Strip */}
-          <div className="mb-8">
-            <h3 className="mb-3 font-display text-base font-bold text-foreground">
-              Photos from Addis Ababa Runners
-            </h3>
-            <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-6">
-              {RUNNER_COMMUNITY_PHOTOS.map((photo) => (
-                <div
-                  key={photo.handle}
-                  className="group relative aspect-square overflow-hidden rounded-xl bg-surface-container shadow-xs"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={photo.image}
-                    alt={`Runner photo by ${photo.handle}`}
-                    className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  />
-                  <span className="absolute right-1.5 bottom-1.5 rounded bg-surface/85 px-1.5 py-0.5 text-[10px] font-bold text-foreground">
-                    {photo.handle}
-                  </span>
-                </div>
-              ))}
+          {productReviews.some((r) => r.photoUrl) ? (
+            <div className="mb-8">
+              <h3 className="mb-3 font-display text-base font-bold text-foreground">
+                Photos from Addis Ababa Runners
+              </h3>
+              <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-6">
+                {productReviews
+                  .filter((r) => r.photoUrl)
+                  .slice(0, 6)
+                  .map((photo) => (
+                    <div
+                      key={photo.id}
+                      className="group relative aspect-square overflow-hidden rounded-xl bg-surface-container shadow-xs"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={photo.photoUrl}
+                        alt={`Runner photo by ${photo.authorName}`}
+                        className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
+                      <span className="absolute right-1.5 bottom-1.5 rounded bg-surface/85 px-1.5 py-0.5 text-[10px] font-bold text-foreground">
+                        {photo.authorName.split(" ")[0]}
+                      </span>
+                    </div>
+                  ))}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           {/* Review Filter Pills */}
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -909,7 +960,15 @@ export function ProductDetailView({ slug }: { slug: string }) {
                 <div className="pt-1">
                   <button
                     type="button"
-                    onClick={() => markReviewHelpful(rev.id)}
+                    onClick={async () => {
+                      await storeService.markHelpful(rev.id);
+                      refetchReviews();
+                      addToast({
+                        title: "Feedback Recorded",
+                        description: "Thanks for rating this review as helpful.",
+                        variant: "success",
+                      });
+                    }}
                     className="inline-flex items-center gap-1.5 font-label text-xs font-semibold text-muted-foreground hover:text-primary cursor-pointer"
                   >
                     <ThumbsUp className="size-3.5" />
@@ -964,8 +1023,11 @@ export function ProductDetailView({ slug }: { slug: string }) {
         <div className="flex items-center justify-center rounded-xl bg-surface-low p-6">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={currentHeroImage}
+            src={getDetailImageUrl(currentHeroImage)}
             alt={product.name}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+            }}
             className="max-h-[60vh] w-full object-contain"
           />
         </div>

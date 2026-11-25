@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SkeletonBase } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 export interface DataTableColumn<T> {
@@ -14,6 +15,8 @@ interface DataTableProps<T> {
   data: T[];
   rowKey: (row: T) => string;
   emptyMessage?: string;
+  isLoading?: boolean;
+  loadingRowCount?: number;
   className?: string;
 }
 
@@ -22,6 +25,8 @@ export function DataTable<T>({
   data,
   rowKey,
   emptyMessage = "No records found.",
+  isLoading = false,
+  loadingRowCount = 5,
   className,
 }: DataTableProps<T>) {
   return (
@@ -45,7 +50,37 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody className="divide-y divide-border/70">
-          {data.length === 0 ? (
+          {isLoading ? (
+            Array.from({ length: loadingRowCount }).map((_, rIdx) => (
+              <tr key={rIdx} className="hover:bg-surface-low/30">
+                {columns.map((col, cIdx) => (
+                  <td key={col.key} className="px-4 py-3.5">
+                    {cIdx === 0 ? (
+                      <div className="flex items-center gap-3">
+                        <SkeletonBase className="size-10 shrink-0 rounded-lg" />
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <SkeletonBase className="h-4 w-32 rounded-md" />
+                          <SkeletonBase className="h-3 w-20 rounded-md" />
+                        </div>
+                      </div>
+                    ) : cIdx === columns.length - 1 ? (
+                      <div className="flex items-center gap-2 justify-end">
+                        <SkeletonBase className="size-8 rounded-lg" />
+                        <SkeletonBase className="size-8 rounded-lg" />
+                      </div>
+                    ) : (
+                      <SkeletonBase
+                        className={cn(
+                          "h-4 rounded-md",
+                          cIdx % 2 === 0 ? "w-24" : "w-16",
+                        )}
+                      />
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))
+          ) : data.length === 0 ? (
             <tr>
               <td colSpan={columns.length} className="px-4 py-10 text-center text-muted-foreground">
                 {emptyMessage}

@@ -1,8 +1,46 @@
-export type GenderCategory = "Men" | "Women" | "Unisex";
+export type GenderCategory = "Men" | "Women" | "Unisex" | "Kids";
+
+export const SHOE_GENDERS: GenderCategory[] = ["Men", "Women", "Unisex", "Kids"];
+
+export const SHOE_TYPES = [
+  "Sneakers",
+  "Running",
+  "Casual",
+  "Formal",
+  "Sports",
+  "Boots",
+  "Sandals",
+  "Loafers",
+] as const;
+
+export type ShoeType = (typeof SHOE_TYPES)[number];
 
 export type ProductStatus = "active" | "draft" | "archived";
 
+export type {
+  AdminPaymentRecordDto,
+  PaymentFormatOption,
+  PaymentProviderConfigDto,
+  PaymentProviderInfo,
+  PaymentReceiptDto,
+  PaymentReceiptStatus,
+  PaymentStatusResponse,
+  PaymentVerificationLogDto,
+  PaymentVerificationResponse,
+  ReceiptAccessUrlResponse,
+  ReceiptCaptureMethod,
+  ReceiptOcrExtractionDto,
+  SubmitPaymentReceiptResponse,
+  VerificationSource,
+} from "@addisgebeya/types";
+
 export type OrderStatus =
+  | "PendingPayment"
+  | "Confirmed"
+  | "Processing"
+  | "Shipped"
+  | "Delivered"
+  | "Cancelled"
   | "pending"
   | "confirmed"
   | "packed"
@@ -11,9 +49,19 @@ export type OrderStatus =
   | "delivered"
   | "cancelled";
 
-export type PaymentMethod = "telebirr" | "cbe_birr" | "bank_transfer" | "cod";
+export type PaymentMethod = string;
 
-export type PaymentStatus = "pending" | "verified" | "cod_due" | "refunded";
+export type PaymentStatus =
+  | "Pending"
+  | "VerificationPending"
+  | "Paid"
+  | "Failed"
+  | "ReviewRequired"
+  | "Refunded"
+  | "pending"
+  | "verified"
+  | "cod_due"
+  | "refunded";
 
 export interface ShoeColorway {
   id: string;
@@ -55,6 +103,18 @@ export interface ShoeReview {
   tag?: string;
 }
 
+export interface ProductImageItem {
+  id: string;
+  productId?: string;
+  colorwayId?: string | null;
+  imageUrl: string;
+  publicId?: string;
+  isPrimary: boolean;
+  altText?: string | null;
+  displayOrder: number;
+  createdAt?: string;
+}
+
 export interface ShoeProduct {
   id: string;
   slug: string;
@@ -64,6 +124,8 @@ export interface ShoeProduct {
   categorySlug: string;
   categoryName: string;
   gender: GenderCategory;
+  shoeType?: string;
+  material?: string | null;
   tagline: string;
   description: string;
   priceETB: number;
@@ -80,6 +142,7 @@ export interface ShoeProduct {
   reserveShowroomPairs?: boolean;
   dispatchDepot?: string;
   colorways: ShoeColorway[];
+  productImages?: ProductImageItem[];
   specs: ShoeSpecs;
   createdAt: string;
 }
@@ -171,6 +234,15 @@ export interface OrderRecord {
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   paymentReference?: string;
+  receiptStatus?: "Pending" | "Processing" | "Verified" | "Rejected" | "Manual Review" | "Approved" | null;
+  verificationSource?: "pending" | "provider_api" | "admin_manual" | string;
+  latestReceiptRejectionReason?: string | null;
+  latestReceiptResubmissionRequested?: boolean;
+  latestReceiptUrl?: string | null;
+  latestReceiptId?: string | null;
+  officialReceiptUrl?: string | null;
+  cbeReceiptToken?: string | null;
+  officialReceiptReason?: string | null;
   status: OrderStatus;
   courierName?: string;
   waybill?: string;
@@ -227,16 +299,73 @@ export interface StoreSettings {
   };
   announcementBarText: string;
   dispatchRibbonText: string;
+  heroImageUrl?: string | null;
+  heroBadgeText?: string;
+  heroCardSubtitle?: string;
+  heroCardTitle?: string;
+  heroCardPriceText?: string;
+  heroCardHref?: string;
 }
 
 export interface AuthUser {
   id: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   phone: string;
   role: "customer" | "admin";
   preferredSize: number;
   subCity: string;
   avatarUrl?: string;
+  dateOfBirth?: string | null;
+  emailVerifiedAt?: string | null;
+  isActive?: boolean;
+  createdAt?: string;
+  totalOrders?: number;
+  recentOrders?: Array<{
+    id: string;
+    totalETB: number;
+    status: string;
+    paymentStatus: string;
+    createdAt: string;
+    itemCount: number;
+    firstItem?: {
+      productName: string;
+      size: number;
+      quantity: number;
+      image: string;
+    } | null;
+  }>;
+  addresses?: AddressRecord[];
+  defaultAddress?: AddressRecord | null;
 }
+
+export interface AddressRecord {
+  id: string;
+  userId: string;
+  label?: string;
+  fullName: string;
+  phoneNumber: string;
+  region: string;
+  city: string;
+  subCity: string;
+  woreda?: string | null;
+  streetAddress?: string | null;
+  landmark?: string | null;
+  riderNotes?: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationRecord {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
 

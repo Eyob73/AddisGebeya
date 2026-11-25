@@ -1,51 +1,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { PROMO_CODES } from "@/data/mock-footwear";
+import { apiClient } from "@/lib/api-client";
+import { storeService } from "@/services/store.service";
 import type { AccessoryItem, CartItem, PromoCode, ShoeProduct } from "@/types/store.types";
-
-const INITIAL_CART_ITEMS: CartItem[] = [
-  {
-    id: "prod-velocity-nitro__cw-vn-teal__42",
-    productId: "prod-velocity-nitro",
-    productSlug: "addis-velocity-pro-nitro",
-    productName: "Addis Velocity Pro Nitro 2.0",
-    categoryName: "Road Running / Performance",
-    brand: "Addis Performance Lab",
-    colorwayId: "cw-vn-teal",
-    colorwayName: "Highland Forest Teal / Sunset Clay",
-    colorHex: "#0E5A6B",
-    size: 42,
-    unitPriceETB: 5850,
-    compareAtPriceETB: 6900,
-    quantity: 1,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAnX2Ac09Qjbv2Q6v87-MUoBmOkIOWFc23JeLu4nVp53yHvWTT4dUCtpqV9M-PYpv-Y6JjDy67sXay4HwAsbCqXvfISYR20LotiQmX-ttGjZt4oGkzcWMx3bJUFYOxIp4YzBs63IOfgUSIIzzVUwZhwmq1C36lANxk0IcWdnASse1Pt6VwUbvVce0UGbGGJ52gVso8-loWMNNPAEjC97ci5RY8--BjzYiRJ4sDBrg",
-    badge: "New Drop",
-  },
-  {
-    id: "prod-bole-court__cw-bc-chalk__41",
-    productId: "prod-bole-court",
-    productSlug: "bole-court-vintage-sneaker",
-    productName: "Bole Court Vintage Sneaker",
-    categoryName: "Lifestyle Heritage",
-    brand: "Bole Heritage Series",
-    colorwayId: "cw-bc-chalk",
-    colorwayName: "Chalk White / Burnt Orange",
-    colorHex: "#FFFFFF",
-    size: 41,
-    unitPriceETB: 4200,
-    compareAtPriceETB: 4800,
-    quantity: 1,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBBDvIcAZs_SRRtPiH1MTJRm7HXiR9aow2XQVgq_GK43lmFyFsLh48W6FBI2uLDbV8_vX3lotwSbJwD9V3kJvSpRhqvyBJynwcnHR5JDRyamqloVAvI8ZiDnDIkCLk2ulNAHDeGVSF6VfcmvxWsYlcbGeSQGJlNwJ7hdQ90fgTwKOH75nhLFRTxf20nic-MgCU2qWXsbYkt9T-KjzthnyDsgV0RHF82CxIsEZespA",
-    badge: "Sale -12%",
-  },
-];
 
 interface CartState {
   items: CartItem[];
   appliedPromoCode: string | null;
+  activePromo: PromoCode | null;
   deliverySpeed: "standard" | "vip";
+  isSyncing: boolean;
+  syncFromBackend: () => Promise<void>;
   addItem: (
     product: ShoeProduct,
     colorwayId: string,
@@ -57,7 +22,7 @@ interface CartState {
   updateQuantity: (cartItemId: string, quantity: number, maxStock?: number) => void;
   removeItem: (cartItemId: string) => void;
   clearCart: () => void;
-  applyPromo: (code: string) => { ok: boolean; message: string; promo?: PromoCode };
+  applyPromo: (code: string) => Promise<{ ok: boolean; message: string; promo?: PromoCode }>;
   removePromo: () => void;
   setDeliverySpeed: (speed: "standard" | "vip") => void;
 }
@@ -65,9 +30,26 @@ interface CartState {
 export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
-      items: INITIAL_CART_ITEMS,
-      appliedPromoCode: "ADDISRUN",
+      items: [],
+      appliedPromoCode: null,
+      activePromo: null,
       deliverySpeed: "standard",
+      isSyncing: false,
+
+      syncFromBackend: async () => {
+        if (get().isSyncing) return;
+        set({ isSyncing: true });
+        try {
+          const res = await apiClient.get<{ id: string; items: CartItem[] }>("/cart");
+          if (res?.items && Array.isArray(res.items) && res.items.length > 0) {
+            set({ items: res.items });
+          }
+        } catch {
+          // Retain local bag on network glitch
+        } finally {
+          set({ isSyncing: false });
+        }
+      },
 
       addItem: (product, colorwayId, size, quantity = 1, maxStock) => {
         const colorway =
@@ -101,29 +83,43 @@ export const useCartStore = create<CartState>()(
             ),
           });
         } else {
-          const newItem: CartItem = {
-            id: itemId,
-            productId: product.id,
-            productSlug: product.slug,
-            productName: product.name,
-            categoryName: product.categoryName,
-            brand: product.brand,
-            colorwayId: colorway.id,
-            colorwayName: colorway.name,
-            colorHex: colorway.hex,
-            size,
-            unitPriceETB: product.priceETB,
-            compareAtPriceETB: product.compareAtPriceETB,
-            quantity: targetQty,
-            image: colorway.images[0] ?? "",
-            badge: product.badges[0],
-          };
-          set({ items: [...get().items, newItem] });
+          set({
+            items: [
+              ...get().items,
+              {
+                id: itemId,
+                productId: product.id,
+                productSlug: product.slug,
+                productName: product.name,
+                categoryName: product.categoryName,
+                brand: product.brand,
+                colorwayId: colorway.id,
+                colorwayName: colorway.name,
+                colorHex: colorway.hex,
+                size,
+                unitPriceETB: product.priceETB,
+                compareAtPriceETB: product.compareAtPriceETB,
+                quantity: targetQty,
+                image: colorway.images[0] ?? "",
+                badge: product.badges[0],
+              },
+            ],
+          });
         }
+
+        // Sync with backend /cart in background
+        apiClient
+          .post("/cart/items", {
+            productId: product.id,
+            colorwayId: colorway.id,
+            size,
+            quantity,
+          })
+          .catch(() => {});
 
         return {
           ok: true,
-          message: `Added ${product.name} (EU ${size}) to your bag.`,
+          message: `${product.name} (EU ${size}) added to your shopping bag.`,
         };
       },
 
@@ -149,7 +145,7 @@ export const useCartStore = create<CartState>()(
                 brand: "AddisGebeya Care",
                 colorwayId: "standard",
                 colorwayName: "Standard Edition",
-                colorHex: "#0E5A6B",
+                colorHex: "#14284B",
                 size: 0,
                 unitPriceETB: accessory.priceETB,
                 quantity: 1,
@@ -165,6 +161,7 @@ export const useCartStore = create<CartState>()(
       updateQuantity: (cartItemId, quantity, maxStock) => {
         if (quantity <= 0) {
           set({ items: get().items.filter((i) => i.id !== cartItemId) });
+          apiClient.delete(`/cart/items/${cartItemId}`).catch(() => {});
           return;
         }
         const cap = maxStock !== undefined ? Math.min(5, maxStock) : 5;
@@ -172,40 +169,36 @@ export const useCartStore = create<CartState>()(
         set({
           items: get().items.map((i) => (i.id === cartItemId ? { ...i, quantity: clamped } : i)),
         });
+
+        // Sync with backend /cart in background
+        apiClient.patch(`/cart/items/${cartItemId}`, { quantity: clamped }).catch(() => {});
       },
 
       removeItem: (cartItemId) => {
         set({ items: get().items.filter((i) => i.id !== cartItemId) });
+        apiClient.delete(`/cart/items/${cartItemId}`).catch(() => {});
       },
 
-      clearCart: () => set({ items: [], appliedPromoCode: null, deliverySpeed: "standard" }),
+      clearCart: () => {
+        set({ items: [], appliedPromoCode: null, activePromo: null, deliverySpeed: "standard" });
+        apiClient.delete("/cart").catch(() => {});
+      },
 
-      applyPromo: (rawCode) => {
-        const normalized = rawCode.trim().toUpperCase();
-        const promo = PROMO_CODES.find((p) => p.code === normalized);
-        if (!promo) {
-          return {
-            ok: false,
-            message: "Invalid voucher code. Try ADDISRUN, WELCOME10, or VIP15.",
-          };
-        }
+      applyPromo: async (rawCode) => {
         const subtotal = get().items.reduce((sum, i) => sum + i.unitPriceETB * i.quantity, 0);
-        if (subtotal < promo.minSubtotalETB) {
-          return {
-            ok: false,
-            message: `Code ${promo.code} requires a minimum subtotal of ${promo.minSubtotalETB.toLocaleString()} ETB.`,
-          };
+        const result = await storeService.validateCoupon(rawCode, subtotal);
+        if (result.ok && result.promo) {
+          set({ appliedPromoCode: result.promo.code, activePromo: result.promo });
         }
-        set({ appliedPromoCode: promo.code });
-        return { ok: true, message: `Coupon ${promo.code} applied: ${promo.description}!`, promo };
+        return result;
       },
 
-      removePromo: () => set({ appliedPromoCode: null }),
+      removePromo: () => set({ appliedPromoCode: null, activePromo: null }),
 
       setDeliverySpeed: (deliverySpeed) => set({ deliverySpeed }),
     }),
     {
-      name: "addisgebeya-cart-v1",
+      name: "addisgebeya-cart-v2",
     },
   ),
 );
@@ -214,50 +207,53 @@ export function computeCartTotals(
   items: CartItem[],
   appliedPromoCode: string | null,
   deliverySpeed: "standard" | "vip",
-  freeThreshold = 3500,
-  standardFee = 200,
-  vipFee = 250,
+  freeThreshold = 0,
+  standardFee = 0,
+  vipFee = 450,
+  activePromo?: PromoCode | null,
 ) {
   const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
   const subtotalETB = items.reduce((sum, i) => sum + i.unitPriceETB * i.quantity, 0);
 
   let discountETB = 0;
-  const activePromo = appliedPromoCode
-    ? PROMO_CODES.find((p) => p.code === appliedPromoCode)
-    : undefined;
-
-  if (activePromo && subtotalETB >= activePromo.minSubtotalETB) {
-    discountETB =
-      activePromo.type === "fixed"
-        ? activePromo.value
-        : Math.round((subtotalETB * activePromo.value) / 100);
+  if (activePromo && appliedPromoCode) {
+    if (subtotalETB >= activePromo.minSubtotalETB) {
+      if (activePromo.type === "percent") {
+        discountETB = Math.round((subtotalETB * activePromo.value) / 100);
+      } else {
+        discountETB = activePromo.value;
+      }
+    }
+  } else if (appliedPromoCode) {
+    const code = appliedPromoCode.toUpperCase();
+    if (code === "ADDISRUN" && subtotalETB >= 3000) {
+      discountETB = Math.round(subtotalETB * 0.15);
+    } else if (code === "WELCOME10") {
+      discountETB = Math.round(subtotalETB * 0.1);
+    } else if (code === "BOLEVIP" && subtotalETB >= 4000) {
+      discountETB = Math.round(subtotalETB * 0.2);
+    } else if (code === "FAST500" && subtotalETB >= 2500) {
+      discountETB = 500;
+    }
   }
 
-  const afterDiscount = Math.max(0, subtotalETB - discountETB);
-  const qualifiesForFreeDelivery = subtotalETB >= freeThreshold;
   const deliveryFeeETB =
     itemCount === 0
       ? 0
       : deliverySpeed === "vip"
         ? vipFee
-        : qualifiesForFreeDelivery
-          ? 0
-          : standardFee;
+        : standardFee;
 
-  const totalETB = afterDiscount + deliveryFeeETB;
-  const amountToFreeDelivery = Math.max(0, freeThreshold - subtotalETB);
-  const freeDeliveryProgress = Math.min(100, Math.round((subtotalETB / freeThreshold) * 100));
+  const totalETB =
+    itemCount === 0 ? 0 : Math.max(0, subtotalETB - discountETB + deliveryFeeETB);
 
   return {
     itemCount,
     subtotalETB,
     discountETB,
-    activePromo,
     deliveryFeeETB,
     totalETB,
-    qualifiesForFreeDelivery,
-    amountToFreeDelivery,
-    freeDeliveryProgress,
+    isFreeDelivery: deliveryFeeETB === 0,
+    freeDeliveryThresholdRemaining: Math.max(0, freeThreshold - subtotalETB),
   };
 }
-

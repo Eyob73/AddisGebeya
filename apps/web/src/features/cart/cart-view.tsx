@@ -19,33 +19,40 @@ import {
   Sparkles,
   Tag,
   Trash2,
-  Truck,
   Wallet,
   Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { CartPageSkeleton } from "@/components/shared/page-skeletons";
 import { SizeGuideModal } from "@/components/shared/size-guide-modal";
-import { CARE_ACCESSORIES } from "@/data/mock-footwear";
+import { useIsMounted } from "@/hooks/use-is-mounted";
+import { useProductsQuery } from "@/hooks/use-store-queries";
 import { computeCartTotals, useCartStore } from "@/stores/cart.store";
 import { useCatalogStore } from "@/stores/catalog.store";
 import { useUiStore } from "@/stores/ui.store";
 import { useWishlistStore } from "@/stores/wishlist.store";
 import { formatETB } from "@/utils/format";
+import {
+  DEFAULT_FALLBACK_IMAGE,
+  getCardImageUrl,
+  getThumbnailImageUrl,
+} from "@/utils/cloudinary";
 
 export function CartView() {
   const {
     items,
     appliedPromoCode,
+    activePromo,
     deliverySpeed,
     updateQuantity,
     removeItem,
-    addAccessory,
+    addItem,
     applyPromo,
     removePromo,
   } = useCartStore();
-  const products = useCatalogStore((s) => s.products);
+  const { data: allStoreProducts = [] } = useProductsQuery();
   const settings = useCatalogStore((s) => s.settings);
   const toggleWishlist = useWishlistStore((s) => s.toggle);
   const addToast = useUiStore((s) => s.addToast);
@@ -53,6 +60,12 @@ export function CartView() {
   const [promoInput, setPromoInput] = React.useState(appliedPromoCode ?? "");
   const [promoOpen, setPromoOpen] = React.useState(true);
   const [sizeGuideOpen, setSizeGuideOpen] = React.useState(false);
+  const isMounted = useIsMounted();
+
+  const recommendedItems = React.useMemo(
+    () => allStoreProducts.slice(0, 3),
+    [allStoreProducts],
+  );
 
   const totals = React.useMemo(
     () =>
@@ -63,6 +76,7 @@ export function CartView() {
         settings.freeDeliveryThresholdETB,
         settings.standardAddisDeliveryFeeETB,
         settings.vipTwoHourDeliveryFeeETB,
+        activePromo,
       ),
     [
       items,
@@ -71,13 +85,14 @@ export function CartView() {
       settings.freeDeliveryThresholdETB,
       settings.standardAddisDeliveryFeeETB,
       settings.vipTwoHourDeliveryFeeETB,
+      activePromo,
     ],
   );
 
-  const handleApplyPromo = (e: React.FormEvent) => {
+  const handleApplyPromo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!promoInput.trim()) return;
-    const res = applyPromo(promoInput);
+    const res = await applyPromo(promoInput);
     addToast({
       title: res.ok ? "Promo Applied" : "Promo Not Applied",
       description: res.message,
@@ -86,10 +101,14 @@ export function CartView() {
   };
 
   const getMaxStock = (productId: string, colorwayId: string, size: number) => {
-    const product = products.find((p) => p.id === productId);
+    const product = allStoreProducts.find((p) => p.id === productId);
     const cw = product?.colorways.find((c) => c.id === colorwayId);
     return cw?.stockBySize[size];
   };
+
+  if (!isMounted) {
+    return <CartPageSkeleton />;
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1360px] px-4 py-8 lg:px-8 lg:py-10">
@@ -112,12 +131,12 @@ export function CartView() {
         </div>
 
         {/* Addis Doorstep Try-On & Buyer Assurance Banner */}
-        <div className="flex flex-col items-start justify-between gap-4 rounded-xl border border-primary/20 bg-primary-light/40 p-4 shadow-card md:flex-row md:items-center sm:p-5">
-          <div className="flex items-start gap-3.5">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs">
-              <Sparkles className="size-5" />
+        <div className="flex flex-col items-stretch justify-between gap-4 rounded-xl border border-primary/20 bg-primary-light/40 p-4 shadow-card sm:p-5 md:flex-row md:items-center">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs sm:size-10">
+              <Sparkles className="size-4 sm:size-5" />
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 flex-1 space-y-1.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-display text-sm font-bold text-foreground sm:text-base">
                   Addis Doorstep Try-On &amp; Fit Assurance
@@ -126,41 +145,44 @@ export function CartView() {
                   Bole Hub Service
                 </Badge>
               </div>
-              <p className="text-xs text-muted-foreground leading-relaxed">
+              <p className="text-xs leading-relaxed text-muted-foreground">
                 Order with complete confidence. Inspect and test-fit your footwear at your doorstep
                 before completing payment via Telebirr or Cash. Our courier can bring an adjacent EU size for free comparison!
               </p>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 font-label text-[11px] text-primary">
-                <span className="flex items-center gap-1 font-semibold">
-                  <CheckCircle2 className="size-3.5 text-cta" /> Same-Day Addis Dispatch
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 font-label text-[11px] text-primary">
+                <span className="inline-flex items-center gap-1.5 font-semibold">
+                  <CheckCircle2 className="size-3.5 shrink-0 text-cta" />
+                  <span>Same-Day Addis Dispatch</span>
                 </span>
-                <span className="flex items-center gap-1 font-semibold">
-                  <CheckCircle2 className="size-3.5 text-cta" /> 100% Genuine Addis Stock
+                <span className="inline-flex items-center gap-1.5 font-semibold">
+                  <CheckCircle2 className="size-3.5 shrink-0 text-cta" />
+                  <span>100% Genuine Addis Stock</span>
                 </span>
-                <span className="flex items-center gap-1 font-semibold">
-                  <CheckCircle2 className="size-3.5 text-cta" /> 7-Day Hassle-Free Size Exchange
+                <span className="inline-flex items-center gap-1.5 font-semibold">
+                  <CheckCircle2 className="size-3.5 shrink-0 text-cta" />
+                  <span>7-Day Hassle-Free Size Exchange</span>
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex w-full shrink-0 flex-col gap-2 min-[400px]:flex-row md:w-auto md:items-center">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => setSizeGuideOpen(true)}
-              className="gap-1.5 text-xs font-bold w-full sm:w-auto bg-surface"
+              className="w-full gap-1.5 bg-surface text-xs font-bold min-[400px]:flex-1 md:w-auto md:flex-initial"
             >
-              <Ruler className="size-3.5 text-primary" />
-              Size Guide
+              <Ruler className="size-3.5 shrink-0 text-primary" />
+              <span>Size Guide</span>
             </Button>
             <Link
               href="/shop"
-              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full border border-border bg-surface px-4 py-2 font-label text-xs font-bold text-primary shadow-xs hover:bg-surface-container transition-colors w-full sm:w-auto"
+              className="inline-flex h-9 w-full shrink-0 items-center justify-center gap-1.5 rounded-full border border-border bg-surface px-4 font-label text-xs font-bold text-primary shadow-xs transition-colors hover:bg-surface-container min-[400px]:flex-1 md:w-auto md:flex-initial"
             >
               <span>Explore Vault</span>
-              <ArrowRight className="size-3.5" />
+              <ArrowRight className="size-3.5 shrink-0" />
             </Link>
           </div>
         </div>
@@ -200,8 +222,11 @@ export function CartView() {
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={item.image}
+                          src={getThumbnailImageUrl(item.image)}
                           alt={item.productName}
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                          }}
                           className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
                         />
                         {item.badge ? (
@@ -218,7 +243,7 @@ export function CartView() {
                       <div className="flex flex-1 flex-col justify-between gap-3">
                         <div>
                           <div className="flex items-start justify-between gap-2">
-                            <div>
+                            <div className="min-w-0">
                               <span className="font-label text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
                                 {item.categoryName}
                               </span>
@@ -230,7 +255,7 @@ export function CartView() {
                                 </h2>
                               </Link>
                             </div>
-                            <div className="text-right">
+                            <div className="shrink-0 text-right">
                               {item.compareAtPriceETB ? (
                                 <span className="block text-xs text-muted-foreground line-through">
                                   {formatETB(item.compareAtPriceETB * item.quantity)}
@@ -359,12 +384,14 @@ export function CartView() {
                     </Button>
                   </form>
 
-                  {totals.activePromo ? (
-                    <div className="flex items-center justify-between rounded-lg bg-primary-light px-3.5 py-2 text-xs text-primary">
+                  {activePromo ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-primary-light px-3.5 py-2 text-xs text-primary">
                       <span className="flex items-center gap-1.5 font-semibold">
-                        <CheckCircle2 className="size-4 text-cta" />
-                        Coupon <strong>{totals.activePromo.code}</strong> applied:{" "}
-                        {totals.activePromo.description} (-{formatETB(totals.discountETB)})
+                        <CheckCircle2 className="size-4 shrink-0 text-cta" />
+                        <span>
+                          Coupon <strong>{activePromo.code}</strong> applied:{" "}
+                          {activePromo.description} (-{formatETB(totals.discountETB)})
+                        </span>
                       </span>
                       <button
                         type="button"
@@ -372,7 +399,7 @@ export function CartView() {
                           removePromo();
                           setPromoInput("");
                         }}
-                        className="font-bold text-muted-foreground underline hover:text-destructive cursor-pointer"
+                        className="shrink-0 font-bold text-muted-foreground underline hover:text-destructive cursor-pointer"
                       >
                         Remove
                       </button>
@@ -419,7 +446,7 @@ export function CartView() {
                     <span className="flex items-center gap-1.5">
                       Promotional Discount
                       <Badge variant="cta" className="text-[10px]">
-                        {totals.activePromo?.code}
+                        {activePromo?.code}
                       </Badge>
                     </span>
                     <span>-{formatETB(totals.discountETB)}</span>
@@ -428,9 +455,9 @@ export function CartView() {
 
                 <div className="flex items-center justify-between">
                   <span>Estimated Delivery Fee</span>
-                  <span className="font-label text-xs font-bold text-primary">
+                  <span className="font-label text-xs font-bold text-cta">
                     {totals.deliveryFeeETB === 0
-                      ? "0 ETB (Qualified)"
+                      ? "FREE"
                       : formatETB(totals.deliveryFeeETB)}
                   </span>
                 </div>
@@ -476,7 +503,7 @@ export function CartView() {
                 <span className="block text-center font-label text-[10px] font-bold tracking-wider text-muted-foreground uppercase">
                   Seamless Local Payment Options
                 </span>
-                <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
                   {[
                     { title: "telebirr", sub: "Mobile Pay" },
                     { title: "CBE Birr", sub: "Commercial" },
@@ -553,46 +580,54 @@ export function CartView() {
         </div>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3">
-          {CARE_ACCESSORIES.map((acc) => (
+          {recommendedItems.map((prod) => (
             <div
-              key={acc.id}
+              key={prod.id}
               className="group flex flex-col justify-between rounded-xl border border-border bg-surface p-4 shadow-card transition-all hover:shadow-card-hover"
             >
               <div className="space-y-3">
                 <div className="relative h-44 w-full overflow-hidden rounded-lg bg-surface-low">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={acc.image}
-                    alt={acc.name}
-                    className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    src={getCardImageUrl(prod.colorways[0]?.images[0])}
+                    alt={prod.name}
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                    }}
+                    className="size-full object-contain p-2 transition-transform duration-500 group-hover:scale-105"
                   />
-                  <Badge variant="secondary" className="absolute top-2.5 right-2.5">
-                    {acc.badge}
-                  </Badge>
+                  {prod.badges[0] ? (
+                    <Badge variant="secondary" className="absolute top-2.5 right-2.5">
+                      {prod.badges[0]}
+                    </Badge>
+                  ) : null}
                 </div>
                 <div>
                   <span className="font-label text-[10px] font-bold tracking-wider text-muted-foreground uppercase">
-                    {acc.category}
+                    {prod.categoryName}
                   </span>
-                  <h4 className="font-display text-base font-bold text-foreground">{acc.name}</h4>
-                  <p className="line-clamp-1 text-xs text-muted-foreground">{acc.description}</p>
+                  <h4 className="font-display text-base font-bold text-foreground">{prod.name}</h4>
+                  <p className="line-clamp-1 text-xs text-muted-foreground">{prod.tagline}</p>
                 </div>
               </div>
               <div className="mt-4 flex items-center justify-between pt-2">
                 <span className="font-display text-base font-extrabold text-primary">
-                  {formatETB(acc.priceETB)}
+                  {formatETB(prod.priceETB)}
                 </span>
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
                   onClick={() => {
-                    addAccessory(acc);
-                    addToast({
-                      title: "Added Care Essential",
-                      description: `${acc.name} added to your shopping bag.`,
-                      variant: "success",
-                    });
+                    const cw = prod.colorways[0];
+                    if (cw) {
+                      addItem(prod, cw.id, 42, 1);
+                      addToast({
+                        title: "Added to Bag",
+                        description: `${prod.name} (EU 42) added to your shopping bag.`,
+                        variant: "success",
+                      });
+                    }
                   }}
                 >
                   <Plus className="size-3.5" /> Quick Add

@@ -2,16 +2,23 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Eye, Package, Truck } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Package, ShieldCheck, Truck } from "lucide-react";
 import { AccountShell } from "@/components/layout/account-shell";
+import { OrderHistoryPageSkeleton } from "@/components/shared/page-skeletons";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { useCatalogStore } from "@/stores/catalog.store";
+import {
+  getPaymentBadgeVariant,
+  isPaymentSettledStatus,
+} from "@/features/payment/payment-verification-panel";
+import { useOrdersQuery } from "@/hooks/use-store-queries";
 import type { OrderRecord } from "@/types/store.types";
 import { formatDateShort, formatETB } from "@/utils/format";
 import { cn } from "@/lib/utils";
+import { DEFAULT_FALLBACK_IMAGE, getThumbnailImageUrl } from "@/utils/cloudinary";
 
 const STATUS_TABS = [
   { id: "all", label: "All Orders" },
@@ -20,16 +27,48 @@ const STATUS_TABS = [
 ];
 
 export default function OrderHistoryPage() {
-  const orders = useCatalogStore((s) => s.orders);
+  const isMounted = useIsMounted();
+  const { data: orders = [], isLoading } = useOrdersQuery();
   const [filter, setFilter] = React.useState("all");
+  const [currentPage, setCurrentPage] = React.useState(1);
   const [selectedOrder, setSelectedOrder] = React.useState<OrderRecord | null>(null);
 
+  const PAGE_SIZE = 5;
+
   const filtered = React.useMemo(() => {
-    if (filter === "delivered") return orders.filter((o) => o.status === "delivered");
-    if (filter === "active")
-      return orders.filter((o) => o.status !== "delivered" && o.status !== "cancelled");
+    if (filter === "delivered") {
+      return orders.filter((o) => o.status.toLowerCase() === "delivered");
+    }
+    if (filter === "active") {
+      return orders.filter((o) => {
+        const s = o.status.toLowerCase();
+        return s !== "delivered" && s !== "cancelled";
+      });
+    }
     return orders;
   }, [orders, filter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedOrders = React.useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
+
+  const handleTabChange = (tabId: string) => {
+    setFilter(tabId);
+    setCurrentPage(1);
+  };
+
+  if (!isMounted || isLoading) {
+    return (
+      <AccountShell
+        title="Order History"
+        subtitle="Review all your AddisGebeya Shoes receipts, sizes purchased, and dispatch details."
+      >
+        <OrderHistoryPageSkeleton />
+      </AccountShell>
+    );
+  }
 
   return (
     <AccountShell
@@ -42,7 +81,7 @@ export default function OrderHistoryPage() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setFilter(tab.id)}
+              onClick={() => handleTabChange(tab.id)}
               className={cn(
                 "rounded-full px-4 py-2 font-label text-xs font-bold transition-colors cursor-pointer",
                 filter === tab.id
@@ -68,7 +107,7 @@ export default function OrderHistoryPage() {
           />
         ) : (
           <div className="space-y-4">
-            {filtered.map((order) => (
+            {paginatedOrders.map((order) => (
               <div
                 key={order.id}
                 className="rounded-2xl border border-border bg-surface p-5 shadow-card"
@@ -80,15 +119,37 @@ export default function OrderHistoryPage() {
                     </span>
                     <Badge
                       variant={
-                        order.status === "delivered"
+                        order.status.toLowerCase() === "delivered"
                           ? "success"
-                          : order.status === "out_for_delivery"
-                            ? "cta"
-                            : "soft"
+                          : order.status === "PendingPayment"
+                            ? "warning"
+                            : order.status.toLowerCase() === "cancelled"
+                              ? "destructive"
+                              : order.status === "out_for_delivery" ||
+                                  order.status === "Shipped" ||
+                                  order.status === "Confirmed"
+                                ? "cta"
+                                : "soft"
                       }
                     >
                       {order.status.replace(/_/g, " ")}
                     </Badge>
+                    <Badge variant={getPaymentBadgeVariant(order.paymentStatus)}>
+                      Payment: {order.paymentStatus.replace(/_/g, " ")}
+                    </Badge>
+                    {order.receiptStatus ? (
+                      <Badge
+                        variant={
+                          order.receiptStatus === "Verified" || order.receiptStatus === "Approved"
+                            ? "success"
+                            : order.receiptStatus === "Rejected"
+                              ? "destructive"
+                              : "warning"
+                        }
+                      >
+                        Receipt: {order.receiptStatus}
+                      </Badge>
+                    ) : null}
                     <span className="text-xs text-muted-foreground">
                       Placed {formatDateShort(order.createdAt)}
                     </span>
@@ -104,8 +165,11 @@ export default function OrderHistoryPage() {
                       <div className="size-14 shrink-0 overflow-hidden rounded-lg bg-surface-media p-1.5">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={item.image}
+                          src={getThumbnailImageUrl(item.image)}
                           alt={item.productName}
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                          }}
                           className="size-full object-contain"
                         />
                       </div>
@@ -124,6 +188,17 @@ export default function OrderHistoryPage() {
                   ))}
                 </div>
 
+                {order.receiptStatus === "Rejected" && order.latestReceiptRejectionReason ? (
+                  <div className="mt-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-xs text-destructive">
+                    <span className="font-bold">
+                      {order.latestReceiptResubmissionRequested
+                        ? "New Receipt Requested: "
+                        : "Receipt Rejected: "}
+                    </span>
+                    <span className="text-foreground">{order.latestReceiptRejectionReason}</span>
+                  </div>
+                ) : null}
+
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3.5">
                   <span className="text-xs text-muted-foreground">
                     Destination: <strong className="text-foreground">{order.subCity}</strong> •
@@ -132,7 +207,25 @@ export default function OrderHistoryPage() {
                       {order.paymentMethod.replace("_", " ")}
                     </strong>
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!isPaymentSettledStatus(order.paymentStatus) &&
+                      order.paymentMethod !== "cod" &&
+                      order.paymentStatus !== "cod_due" &&
+                      order.status.toLowerCase() !== "cancelled" && (
+                        <Button asChild variant="cta" size="sm">
+                          <Link href={`/checkout?order=${encodeURIComponent(order.id)}`}>
+                            <ShieldCheck className="size-3.5" />{" "}
+                            {order.receiptStatus === "Rejected"
+                              ? "Upload Replacement Receipt"
+                              : order.receiptStatus === "Manual Review"
+                                ? "Retry Verification / Review"
+                                : order.receiptStatus === "Pending" ||
+                                    order.receiptStatus === "Processing"
+                                  ? "View Receipt Status"
+                                  : "Submit Receipt / Verify"}
+                          </Link>
+                        </Button>
+                      )}
                     <Button
                       type="button"
                       variant="outline"
@@ -150,6 +243,42 @@ export default function OrderHistoryPage() {
                 </div>
               </div>
             ))}
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-border pt-4">
+                <p className="text-xs text-muted-foreground">
+                  Showing {(currentPage - 1) * PAGE_SIZE + 1} to{" "}
+                  {Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} orders
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                  >
+                    <ChevronLeft className="size-4 mr-1" /> Previous
+                  </Button>
+
+                  <span className="text-xs font-bold text-foreground px-2">
+                    {currentPage} / {totalPages}
+                  </span>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                  >
+                    Next <ChevronRight className="size-4 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

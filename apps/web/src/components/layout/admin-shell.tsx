@@ -15,6 +15,7 @@ import {
   Package,
   PlusCircle,
   Settings,
+  ShieldCheck,
   Sun,
   Truck,
   Users,
@@ -22,7 +23,8 @@ import {
   X,
 } from "lucide-react";
 import { BrandLogo } from "@/components/shared/brand-logo";
-import { HERO_ASSETS } from "@/data/mock-footwear";
+import { UserAvatar } from "@/components/shared/user-avatar";
+import { useAuthStore } from "@/stores/auth.store";
 import { useCatalogStore } from "@/stores/catalog.store";
 import { useUiStore } from "@/stores/ui.store";
 import { cn } from "@/lib/utils";
@@ -34,13 +36,15 @@ interface AdminShellProps {
 export function AdminShell({ children }: AdminShellProps) {
   const pathname = usePathname();
   const { isAdminSidebarOpen, setAdminSidebarOpen, theme, toggleTheme } = useUiStore();
+  const user = useAuthStore((s) => s.user);
   const products = useCatalogStore((s) => s.products);
   const orders = useCatalogStore((s) => s.orders);
   const settings = useCatalogStore((s) => s.settings);
 
-  const pendingDispatchCount = orders.filter(
-    (o) => o.status !== "delivered" && o.status !== "cancelled",
-  ).length;
+  const pendingDispatchCount = orders.filter((o) => {
+    const s = o.status.toLowerCase();
+    return s !== "delivered" && s !== "cancelled";
+  }).length;
 
   const navItems = [
     { href: "/admin", label: "Overview", icon: LayoutDashboard, exact: true },
@@ -60,6 +64,7 @@ export function AdminShell({ children }: AdminShellProps) {
       badge: String(pendingDispatchCount),
       badgeCta: true,
     },
+    { href: "/admin/payments", label: "Payment Verification", icon: ShieldCheck },
     { href: "/admin/customers", label: "Customer CRM", icon: Users },
     { href: "/admin/reports", label: "Sales Reports", icon: BarChart3 },
     { href: "/admin/settings", label: "Store Settings", icon: Settings },
@@ -83,16 +88,16 @@ export function AdminShell({ children }: AdminShellProps) {
               <span className="size-1.5 animate-ping rounded-full bg-white" />
               Live Dispatch Mode
             </span>
-            <span className="hidden text-[#EBF6F8]/90 sm:inline">
+            <span className="hidden text-banner-muted/90 sm:inline">
               {settings.dispatchRibbonText}
             </span>
           </div>
-          <div className="flex items-center gap-4 font-label text-[11px] font-semibold text-[#EBF6F8]">
+          <div className="flex items-center gap-4 font-label text-[11px] font-semibold text-banner-muted">
             <span className="hidden items-center gap-1 md:inline-flex">
-              <CheckCircle2 className="size-3.5 text-[#FFDBD0]" /> Telebirr: Active
+              <CheckCircle2 className="size-3.5 text-banner-warm" /> Telebirr: Active
             </span>
             <span className="hidden items-center gap-1 md:inline-flex">
-              <Wallet className="size-3.5 text-[#FFDBD0]" /> CBE Birr: Operational
+              <Wallet className="size-3.5 text-banner-warm" /> CBE Birr: Operational
             </span>
             <Link
               href="/"
@@ -147,14 +152,16 @@ export function AdminShell({ children }: AdminShellProps) {
             </button>
 
             <div className="hidden items-center gap-2.5 rounded-xl bg-surface-low px-3 py-1.5 md:flex">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={HERO_ASSETS.ownerAvatar}
-                alt="Kidus Assefa"
-                className="size-8 rounded-full object-cover"
+              <UserAvatar
+                src={user?.avatarUrl}
+                name={user?.name || "Kidus Assefa"}
+                alt={user?.name || "Store Owner"}
+                className="size-8 text-xs"
               />
               <div className="leading-tight">
-                <p className="font-display text-xs font-bold text-foreground">Kidus Assefa</p>
+                <p className="font-display text-xs font-bold text-foreground">
+                  {user?.name || "Kidus Assefa"}
+                </p>
                 <p className="font-label text-[10px] text-muted-foreground">
                   Founder &amp; Sole Proprietor
                 </p>
@@ -248,11 +255,11 @@ export function AdminShell({ children }: AdminShellProps) {
             <span className="inline-block rounded-full bg-cta px-2 py-0.5 font-label text-[10px] font-bold uppercase">
               Showroom Live
             </span>
-            <h4 className="mt-2 font-display text-sm font-bold">Bole Medhanialem Studio</h4>
-            <p className="mt-1 text-[11px] text-[#EBF6F8]/80">{settings.showroomHours}</p>
+            <h4 className="mt-2 font-display text-sm font-bold">Bole Store</h4>
+            <p className="mt-1 text-[11px] text-banner-muted/80">{settings.showroomHours}</p>
             <Link
               href="/"
-              className="mt-3 inline-flex items-center gap-1 font-label text-[11px] font-bold text-[#B0ECFF] hover:underline"
+              className="mt-3 inline-flex items-center gap-1 font-label text-[11px] font-bold text-banner-accent hover:underline"
             >
               Switch to Customer Store →
             </Link>

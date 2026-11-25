@@ -3,26 +3,68 @@
 import * as React from "react";
 import { Save, Store, Truck, Wallet } from "lucide-react";
 import { ApiStatusCard } from "@/components/shared/api-status-card";
+import { AdminSettingsSkeleton } from "@/components/shared/page-skeletons";
 import { Button } from "@/components/ui/button";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Input } from "@/components/ui/input";
-import { useCatalogStore } from "@/stores/catalog.store";
+import { useStoreSettingsQuery } from "@/hooks/use-store-queries";
+import { storeService } from "@/services/store.service";
 import { useUiStore } from "@/stores/ui.store";
 
 export default function AdminSettingsPage() {
-  const { settings, updateSettings } = useCatalogStore();
+  const { data: settingsData, isLoading, refetch } = useStoreSettingsQuery();
   const addToast = useUiStore((s) => s.addToast);
 
-  const [form, setForm] = React.useState(settings);
+  const [form, setForm] = React.useState(
+    settingsData ?? {
+      storeName: "AddisGebeya Shoes",
+      tagline: "Step into Your Style.",
+      showroomAddress: "Bole",
+      phone: "+251 911 234 567",
+      whatsapp: "+251 911 234 567",
+      telegramHandle: "@AddisGebeyaShoes",
+      email: "concierge@addisgebeyashoes.et",
+      showroomHours: "Mon - Sun: 8:30 AM - 8:30 PM EAT",
+      freeDeliveryThresholdETB: 0,
+      standardAddisDeliveryFeeETB: 0,
+      vipTwoHourDeliveryFeeETB: 250,
+      regionalCargoFeeETB: 350,
+      vatPercent: 15,
+      paymentMethods: {
+        telebirr: true,
+        cbeBirr: true,
+        bankTransfer: true,
+        cod: true,
+      },
+      announcementBarText:
+        "Free Express Delivery in Addis Ababa on Orders Over 3,500 ETB • 100% Authentic Footwear Guarantee",
+      dispatchRibbonText:
+        "Addis Ababa Hub: Megenagna & Bole Couriers actively en route. 18 live dispatches scheduled today.",
+    },
+  );
 
-  const handleSave = (e: React.FormEvent) => {
+  React.useEffect(() => {
+    if (settingsData) {
+      setForm(settingsData);
+    }
+  }, [settingsData]);
+
+  const isMounted = useIsMounted();
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings(form);
+    await storeService.updateStoreSettings(form);
+    refetch();
     addToast({
       title: "Store Settings Saved",
       description: "Delivery thresholds, storefront banners, and showroom details updated.",
       variant: "success",
     });
   };
+
+  if (!isMounted || isLoading) {
+    return <AdminSettingsSkeleton />;
+  }
 
   return (
     <div className="space-y-6">

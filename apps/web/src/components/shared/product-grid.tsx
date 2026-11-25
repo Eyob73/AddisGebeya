@@ -3,7 +3,7 @@
 import { PackageOpen } from "lucide-react";
 import { ProductCard } from "@/components/shared/product-card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonProductGrid } from "@/components/ui/skeleton";
 import type { ShoeProduct } from "@/types/store.types";
 import { cn } from "@/lib/utils";
 
@@ -31,20 +31,12 @@ export function ProductGrid({
 
   if (isLoading) {
     return (
-      <div className={cn("grid", gridCols, className)}>
-        {Array.from({ length: columns * 2 }).map((_, i) => (
-          <div key={i} className="rounded-xl border border-border bg-surface p-4 space-y-3">
-            <Skeleton className="aspect-[4/3] w-full rounded-lg" />
-            <Skeleton className="h-3 w-1/3" />
-            <Skeleton className="h-5 w-3/4" />
-            <Skeleton className="h-4 w-full" />
-            <div className="flex items-center justify-between pt-2">
-              <Skeleton className="h-6 w-24" />
-              <Skeleton className="h-8 w-20 rounded-full" />
-            </div>
-          </div>
-        ))}
-      </div>
+      <SkeletonProductGrid
+        columns={columns}
+        count={columns * 2}
+        variant={variant}
+        className={className}
+      />
     );
   }
 

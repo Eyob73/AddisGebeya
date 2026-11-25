@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
 import { useCatalogStore } from "@/stores/catalog.store";
 import { formatETB } from "@/utils/format";
+import { DEFAULT_FALLBACK_IMAGE, getThumbnailImageUrl } from "@/utils/cloudinary";
 import { cn } from "@/lib/utils";
 
 interface SearchBarProps {
@@ -101,8 +102,11 @@ export function SearchBar({
                   <div className="size-11 shrink-0 overflow-hidden rounded-lg bg-surface-media p-1">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={product.colorways[0]?.images[0]}
+                      src={getThumbnailImageUrl(product.colorways[0]?.images[0])}
                       alt={product.name}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = DEFAULT_FALLBACK_IMAGE;
+                      }}
                       className="size-full object-contain"
                     />
                   </div>

@@ -1,17 +1,25 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { Heart, Trash2 } from "lucide-react";
 import { ProductGrid } from "@/components/shared/product-grid";
+import { WishlistPageSkeleton } from "@/components/shared/page-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { useIsMounted } from "@/hooks/use-is-mounted";
 import { useCatalogStore } from "@/stores/catalog.store";
 import { useWishlistStore } from "@/stores/wishlist.store";
 
 export default function WishlistPage() {
+  const isMounted = useIsMounted();
   const { productIds, clear } = useWishlistStore();
   const products = useCatalogStore((s) => s.products);
+
+  if (!isMounted) {
+    return <WishlistPageSkeleton />;
+  }
 
   const savedProducts = products.filter((p) => productIds.includes(p.id));
 

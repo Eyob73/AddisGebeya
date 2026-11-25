@@ -106,7 +106,7 @@ export default function ContactPage() {
 
           <div className="rounded-2xl bg-primary-deep p-6 text-white shadow-md">
             <h3 className="font-display text-lg font-bold">Instant Messaging Support</h3>
-            <p className="mt-1 text-xs text-[#EBF6F8]/85">
+            <p className="mt-1 text-xs text-banner-muted/85">
               Need an instant photo of a shoe colorway or EU insole measurement? Message our
               specialists on Telegram ({settings.telegramHandle}) or WhatsApp ({settings.whatsapp}).
             </p>

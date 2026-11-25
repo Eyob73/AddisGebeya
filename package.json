@@ -9,13 +9,14 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
+    "dev": "pnpm -r --parallel --filter @addisgebeya/api --filter @addisgebeya/web dev",
     "build:packages": "pnpm --filter \"./packages/*\" build",
     "dev:web": "pnpm --filter @addisgebeya/web dev",
     "dev:api": "pnpm --filter @addisgebeya/api dev",
     "build:web": "pnpm build:packages && pnpm --filter @addisgebeya/web build",
     "build:api": "pnpm build:packages && pnpm --filter @addisgebeya/api build",
     "lint": "pnpm -r --if-present lint",
-    "typecheck": "pnpm build:packages && pnpm -r --if-present typecheck",
+    "typecheck": "pnpm build:packages && pnpm -r --if-present  typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml}\"",
     "db:generate": "pnpm --filter @addisgebeya/api db:generate",

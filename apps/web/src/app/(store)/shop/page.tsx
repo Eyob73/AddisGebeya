@@ -5,7 +5,7 @@ import { CatalogView } from "@/features/catalog/catalog-view";
 export const metadata: Metadata = {
   title: "Shop All Footwear",
   description:
-    "Browse authentic sneakers, running shoes, loafers, boots, and handcrafted Ethiopian leather shoes in ETB.",
+    "Browse authentic sneakers, running shoes, loafers, boots, and handcrafted leather shoes in ETB.",
 };
 
 export default function ShopAllPage() {

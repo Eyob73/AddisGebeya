@@ -1,6 +1,7 @@
 "use client";
 
-import { EU_SIZES } from "@/data/mock-footwear";
+import * as React from "react";
+import { EU_SIZES, getConfiguredSizesForColorway } from "@/data/mock-footwear";
 import { cn } from "@/lib/utils";
 
 interface SizeSelectorProps {
@@ -17,11 +18,16 @@ export function SizeSelector({
   stockBySize,
   selectedSize,
   onSelect,
-  sizes = EU_SIZES,
+  sizes,
   compact = false,
   showStockHints = true,
   className,
 }: SizeSelectorProps) {
+  const resolvedSizes = React.useMemo(
+    () => (sizes && sizes.length > 0 ? sizes : getConfiguredSizesForColorway(stockBySize, [...EU_SIZES])),
+    [sizes, stockBySize],
+  );
+
   return (
     <div
       className={cn(
@@ -32,7 +38,7 @@ export function SizeSelector({
       role="radiogroup"
       aria-label="Select EU shoe size"
     >
-      {sizes.map((size) => {
+      {resolvedSizes.map((size) => {
         const stock = stockBySize[size] ?? 0;
         const isOutOfStock = stock <= 0;
         const isLowStock = stock > 0 && stock <= 2;

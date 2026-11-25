@@ -7,5 +7,576 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Domain models will be added in subsequent development phases.
+enum Role {
+  CUSTOMER
+  ADMIN
+}
 
+model User {
+  id              String         @id @default(uuid())
+  fullName        String
+  email           String         @unique
+  phoneNumber     String?
+  passwordHash    String
+  role            Role           @default(CUSTOMER)
+  isActive        Boolean        @default(true)
+  emailVerifiedAt DateTime?
+  dateOfBirth     DateTime?
+  preferredSize   Int?           @default(42)
+  subCity         String?
+  avatarUrl       String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  refreshTokens   RefreshToken[]
+  addresses       Address[]
+  orders          Order[]
+  cart            Cart?
+  wishlist        Wishlist?
+  reviews         Review[]
+  notifications   Notification[]
+  payments        Payment[]
+  paymentReceipts PaymentReceipt[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model Address {
+  id            String   @id @default(uuid())
+  userId        String
+  label         String?  @default("Home")
+  fullName      String
+  phoneNumber   String
+  region        String   @default("Addis Ababa")
+  city          String   @default("Addis Ababa")
+  subCity       String
+  woreda        String?
+  streetAddress String?
+  landmark      String?
+  riderNotes    String?
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders        Order[]
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+model Category {
+  id           String    @id @default(uuid())
+  name         String
+  slug         String    @unique
+  eyebrow      String?
+  subtitle     String?
+  description  String?
+  imageUrl     String
+  isFeatured   Boolean   @default(false)
+  isActive     Boolean   @default(true)
+  displayOrder Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  products     Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id                   String            @id @default(uuid())
+  name                 String
+  slug                 String            @unique
+  sku                  String            @unique
+  brand                String
+  categoryId           String
+  gender               String            @default("Unisex")
+  shoeType             String            @default("Sneakers")
+  material             String?
+  tagline              String?
+  description          String
+  priceETB             Decimal           @db.Decimal(10, 2)
+  compareAtPriceETB    Decimal?          @db.Decimal(10, 2)
+  cogsETB              Decimal?          @db.Decimal(10, 2)
+  rating               Float             @default(0.0)
+  reviewCount          Int               @default(0)
+  badges               String[]          @default([])
+  status               String            @default("active")
+  featuredTrending     Boolean           @default(false)
+  featuredNewDrop      Boolean           @default(false)
+  isOnSale             Boolean           @default(false)
+  freeAddisDelivery    Boolean           @default(true)
+  reserveShowroomPairs Boolean           @default(true)
+  dispatchDepot        String?           @default("Bole Medhanialem Central Hub")
+  specs                Json?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  category             Category          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  colorways            ProductColorway[]
+  variants             ProductVariant[]
+  images               ProductImage[]
+  cartItems            CartItem[]
+  orderItems           OrderItem[]
+  wishlistItems        WishlistItem[]
+  reviews              Review[]
+
+  @@index([categoryId])
+  @@index([slug])
+  @@index([status])
+  @@index([brand])
+  @@index([gender])
+  @@index([shoeType])
+  @@map("products")
+}
+
+model ProductColorway {
+  id            String           @id @default(uuid())
+  productId     String
+  name          String
+  hex           String
+  secondaryHex  String?
+  soleHex       String?
+  images        String[]         @default([])
+  createdAt     DateTime         @default(now())
+
+  product       Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variants      ProductVariant[]
+  productImages ProductImage[]
+
+  @@index([productId])
+  @@map("product_colorways")
+}
+
+model ProductVariant {
+  id                String          @id @default(uuid())
+  productId         String
+  colorwayId        String
+  size              Int
+  sku               String?
+  priceAdjustment   Decimal         @default(0.0) @db.Decimal(10, 2)
+  stockQuantity     Int             @default(0)
+  lowStockThreshold Int             @default(3)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  colorway          ProductColorway @relation(fields: [colorwayId], references: [id], onDelete: Cascade)
+  cartItems         CartItem[]
+
+  @@unique([colorwayId, size])
+  @@index([productId])
+  @@index([colorwayId])
+  @@map("product_variants")
+}
+
+model ProductImage {
+  id           String           @id @default(uuid())
+  productId    String
+  colorwayId   String?
+  imageUrl     String
+  publicId     String?          @default("")
+  isPrimary    Boolean          @default(false)
+  altText      String?
+  displayOrder Int              @default(0)
+  createdAt    DateTime         @default(now())
+
+  product      Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  colorway     ProductColorway? @relation(fields: [colorwayId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([colorwayId])
+  @@index([isPrimary])
+  @@map("product_images")
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String?    @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id           String          @id @default(uuid())
+  cartId       String
+  productId    String
+  colorwayId   String
+  variantId    String?
+  size         Int
+  quantity     Int             @default(1)
+  unitPriceETB Decimal         @db.Decimal(10, 2)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  cart         Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant      ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@unique([cartId, productId, colorwayId, size])
+  @@map("cart_items")
+}
+
+model Order {
+  id               String        @id @default(uuid())
+  orderNumber      String        @unique
+  userId           String?
+  addressId        String?
+  customerName     String
+  customerEmail    String
+  customerPhone    String
+  city             String        @default("Addis Ababa")
+  subCity          String
+  landmark         String?
+  riderNotes       String?
+  deliverySpeed    String        @default("standard")
+  deliveryFeeETB   Decimal       @default(0) @db.Decimal(10, 2)
+  subtotalETB      Decimal       @db.Decimal(10, 2)
+  discountETB      Decimal       @default(0) @db.Decimal(10, 2)
+  promoCode        String?
+  totalETB         Decimal       @db.Decimal(10, 2)
+  paymentMethod    String        @default("telebirr")
+  paymentStatus    String        @default("pending")
+  paymentReference String?
+  status           String        @default("pending")
+  courierName      String?
+  waybill          String?
+  trackingEvents   Json?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  user             User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  address          Address?      @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  items            OrderItem[]
+  payment          Payment?
+  slips            PaymentSlip[]
+  receipts         PaymentReceipt[]
+
+  @@index([userId])
+  @@index([orderNumber])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String   @id @default(uuid())
+  orderId      String
+  productId    String?
+  productName  String
+  sku          String
+  colorwayName String
+  size         Int
+  quantity     Int
+  unitPriceETB Decimal  @db.Decimal(10, 2)
+  totalPriceETB Decimal @db.Decimal(10, 2)
+  image        String
+  createdAt    DateTime @default(now())
+
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model Payment {
+  id                   String                   @id @default(uuid())
+  orderId              String                   @unique
+  userId               String?
+  provider             String                   @default("cbe")
+  transactionReference String
+  verifiedReference    String?                  @unique
+  extractedReference   String?
+  paymentMethod        String
+  amount               Decimal                  @db.Decimal(10, 2)
+  extractedAmount      Decimal?                 @db.Decimal(10, 2)
+  verifiedAmount       Decimal?                 @db.Decimal(10, 2)
+  currency             String                   @default("ETB")
+  paymentStatus        String                   @default("Pending")
+  verificationSource   String                   @default("pending")
+  failureReason        String?
+  senderName           String?
+  senderAccount        String?
+  receiverName         String?
+  receiverAccount      String?
+  transactionDate      DateTime?
+  sourceUrl            String?
+  officialReceiptUrl   String?
+  cbeReceiptToken      String?
+  paidAt               DateTime?
+  verifiedAt           DateTime?
+  reviewedByAdminId    String?
+  reviewReason         String?
+  reviewedAt           DateTime?
+  verificationResponse Json?
+  providerResponse     Json?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @default(now()) @updatedAt
+
+  order                Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user                 User?                    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  logs                 PaymentVerificationLog[]
+  receipts             PaymentReceipt[]
+
+  @@index([userId])
+  @@index([provider])
+  @@index([paymentStatus])
+  @@index([transactionReference])
+  @@index([verifiedAt])
+  @@map("payments")
+}
+
+model PaymentReceipt {
+  id                          String    @id @default(uuid())
+  paymentId                   String
+  orderId                     String
+  userId                      String
+  provider                    String
+  transactionReference        String?
+  normalizedVerifiedReference String?   @unique
+  extractedReference          String?
+  extractedQrData             String?
+  extractedAmount             Decimal?  @db.Decimal(10, 2)
+  extractedDate               String?
+  extractedSenderName         String?
+  extractedSenderAccount      String?
+  extractedReceiverName       String?
+  extractedReceiverAccount    String?
+  extractedStatus             String?
+  detectedProvider            String?
+  ocrConfidence               Float?
+  ocrRawText                  String?
+  ocrCompletedAt              DateTime?
+  verifiedAmount              Decimal?  @db.Decimal(10, 2)
+  verifiedCurrency            String?
+  verificationSource          String    @default("pending")
+  failureReason               String?
+  providerResponse            Json?
+  verifiedAt                  DateTime?
+  officialReceiptUrl          String?
+  cbeReceiptToken             String?
+  imageUrl                    String
+  publicId                    String
+  mimeType                    String
+  fileSizeBytes               Int
+  width                       Int?
+  height                      Int?
+  captureMethod               String    @default("upload")
+  status                      String    @default("Pending")
+  rejectionReason             String?
+  resubmissionRequested       Boolean   @default(false)
+  reviewedByAdminId           String?
+  reviewedAt                  DateTime?
+  submittedAt                 DateTime  @default(now())
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  payment                     Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  order                       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user                        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+  @@index([submittedAt])
+  @@map("payment_receipts")
+}
+
+model PaymentVerificationLog {
+  id                 String   @id @default(uuid())
+  paymentId          String
+  orderId            String
+  userId             String?
+  provider           String
+  submittedReference String?
+  verificationStatus String
+  errorMessage       String?
+  chekiHttpStatus    Int?
+  attemptedAt        DateTime @default(now())
+  responseData       Json?
+  actorType          String   @default("customer")
+  actorId            String?
+  reason             String?
+
+  payment            Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([orderId])
+  @@index([verificationStatus])
+  @@index([attemptedAt])
+  @@map("payment_verification_logs")
+}
+
+model PaymentProviderConfig {
+  id                     String   @id @default(uuid())
+  providerCode           String   @unique
+  displayName            String
+  receivingAccountName   String
+  receivingAccountNumber String
+  accountSuffixDigits    Int?
+  instructions           String?
+  isEnabled              Boolean  @default(true)
+  maxPaymentAgeDays      Int      @default(30)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([isEnabled])
+  @@map("payment_provider_configs")
+}
+
+model PaymentSlip {
+  id             String   @id @default(uuid())
+  reference      String   @unique
+  provider       String
+  amountETB      Decimal  @db.Decimal(10, 2)
+  senderName     String
+  senderInfo     String
+  matchedOrderId String?
+  receivedAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  matchedOrder   Order?   @relation(fields: [matchedOrderId], references: [id], onDelete: SetNull)
+
+  @@index([matchedOrderId])
+  @@map("payment_slips")
+}
+
+model Wishlist {
+  id        String         @id @default(uuid())
+  userId    String         @unique
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WishlistItem[]
+
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id         String   @id @default(uuid())
+  wishlistId String
+  productId  String
+  createdAt  DateTime @default(now())
+
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([wishlistId, productId])
+  @@map("wishlist_items")
+}
+
+model Review {
+  id             String   @id @default(uuid())
+  productId      String
+  userId         String?
+  orderId        String?
+  authorName     String
+  authorInitials String
+  location       String
+  purchasedSize  Int
+  rating         Int
+  title          String
+  comment        String
+  dateLabel      String
+  verified       Boolean  @default(true)
+  helpfulCount   Int      @default(0)
+  photoUrl       String?
+  tag            String?
+  createdAt      DateTime @default(now())
+
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([userId])
+  @@map("reviews")
+}
+
+model Coupon {
+  id                 String    @id @default(uuid())
+  code               String    @unique
+  discountType       String
+  discountValue      Decimal   @db.Decimal(10, 2)
+  minimumOrderAmount Decimal   @default(0) @db.Decimal(10, 2)
+  maximumDiscount    Decimal?  @db.Decimal(10, 2)
+  description        String?
+  expiryDate         DateTime?
+  usageLimit         Int?
+  usedCount          Int       @default(0)
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@map("coupons")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      String   @default("info")
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model StoreSetting {
+  id                         String   @id @default("default")
+  storeName                  String   @default("AddisGebeya Footwear")
+  tagline                    String   @default("Engineered for Addis Ababa. Built for Ethiopia.")
+  showroomAddress            String   @default("Bole, Addis Ababa, Ethiopia")
+  phone                      String   @default("+251 911 234 567")
+  whatsapp                   String   @default("+251 911 234 567")
+  telegramHandle             String   @default("@AddisGebeyaHQ")
+  email                      String   @default("contact@addisgebeyashoes.et")
+  showroomHours              String   @default("Mon - Sat: 8:30 AM - 8:00 PM | Sun: 10:00 AM - 6:00 PM")
+  freeDeliveryThresholdETB   Decimal  @default(0) @db.Decimal(10, 2)
+  standardAddisDeliveryFeeETB Decimal @default(0) @db.Decimal(10, 2)
+  vipTwoHourDeliveryFeeETB   Decimal  @default(450) @db.Decimal(10, 2)
+  regionalCargoFeeETB        Decimal  @default(650) @db.Decimal(10, 2)
+  vatPercent                 Decimal  @default(15) @db.Decimal(5, 2)
+  paymentMethods             Json?
+  announcementBarText        String   @default("Free Addis delivery on orders over 10,000 ETB • 2-Hour Express VIP Delivery Available")
+  dispatchRibbonText         String   @default("Real-time showroom inventory • Bole Central Hub Dispatch")
+  heroImageUrl               String?
+  heroBadgeText              String   @default("Addis Stock Ready")
+  heroCardSubtitle           String   @default("New Arrival • Track Spec")
+  heroCardTitle              String   @default("Addis Velocity Pro Nitro")
+  heroCardPriceText          String   @default("5,850 ETB")
+  heroCardHref               String   @default("/products/addis-velocity-pro-nitro")
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@map("store_settings")
+}
