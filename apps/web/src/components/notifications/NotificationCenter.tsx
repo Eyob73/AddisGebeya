@@ -140,13 +140,13 @@ export function NotificationCenter() {
   return (
     <div className="space-y-6">
       {/* Top Action & Status Bar */}
-      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-border bg-surface p-5 shadow-card sm:flex-row sm:items-center">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-primary-light text-primary">
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-border bg-surface p-4 shadow-card sm:flex-row sm:items-center sm:p-5">
+        <div className="flex min-w-0 items-start gap-2.5 sm:items-center">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-light text-primary">
             <Bell className="size-5" aria-hidden="true" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-display text-lg font-extrabold text-foreground">
                 Notification Center
               </h2>
@@ -159,7 +159,7 @@ export function NotificationCenter() {
               >
                 {connectionStatus === "connected" ? (
                   <>
-                    <Wifi className="size-3" /> Real-Time Connected
+                    <Wifi className="size-3" /> Connected
                   </>
                 ) : (
                   <>
@@ -230,7 +230,7 @@ export function NotificationCenter() {
 
           {/* Search & Type Filter */}
           <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-            <div className="relative min-w-[220px]">
+            <div className="relative w-full sm:w-auto sm:min-w-[220px]">
               <Search className="pointer-events-none absolute top-3 left-3.5 size-4 text-muted-foreground" />
               <Input
                 value={searchInput}

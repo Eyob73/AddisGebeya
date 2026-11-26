@@ -48,7 +48,7 @@ export function NotificationItem({
     return (
       <div
         className={cn(
-          "group relative flex items-start gap-3 rounded-xl px-3 py-2.5 transition-colors",
+          "group relative flex items-start gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors sm:gap-3 sm:px-3",
           notification.isRead
             ? "bg-transparent hover:bg-surface-low/80"
             : "bg-primary-light/45 hover:bg-primary-light/70 dark:bg-primary-light/25",
@@ -70,7 +70,7 @@ export function NotificationItem({
                 href={href}
                 onClick={handleOpenLink}
                 className={cn(
-                  "line-clamp-1 text-xs transition-colors hover:text-primary",
+                  "min-w-0 line-clamp-1 text-xs transition-colors hover:text-primary",
                   notification.isRead
                     ? "font-medium text-foreground/90"
                     : "font-bold text-foreground",
@@ -81,7 +81,7 @@ export function NotificationItem({
             ) : (
               <p
                 className={cn(
-                  "line-clamp-1 text-xs",
+                  "min-w-0 line-clamp-1 text-xs",
                   notification.isRead
                     ? "font-medium text-foreground/90"
                     : "font-bold text-foreground",
@@ -102,17 +102,17 @@ export function NotificationItem({
             {notification.message}
           </p>
 
-          <div className="mt-1.5 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               {!notification.isRead ? (
-                <span className="inline-flex items-center gap-1 font-label text-[10px] font-bold text-cta">
+                <span className="inline-flex shrink-0 items-center gap-1 font-label text-[10px] font-bold text-cta">
                   <span className="size-1.5 rounded-full bg-cta" /> Unread
                 </span>
               ) : (
-                <span className="font-label text-[10px] text-muted-foreground">Read</span>
+                <span className="shrink-0 font-label text-[10px] text-muted-foreground">Read</span>
               )}
               {notification.relatedEntityId && notification.relatedEntityType !== "customer" ? (
-                <span className="rounded bg-surface-container px-1.5 py-0.5 font-mono text-[10px] font-semibold text-foreground/80">
+                <span className="max-w-[140px] truncate rounded bg-surface-container px-1.5 py-0.5 font-mono text-[10px] font-semibold text-foreground/80 sm:max-w-[180px]">
                   {notification.relatedEntityType === "order" || notification.relatedEntityType === "payment"
                     ? `#${notification.relatedEntityId}`
                     : notification.relatedEntityId}
@@ -120,14 +120,14 @@ export function NotificationItem({
               ) : null}
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               {!notification.isRead && onMarkAsRead ? (
                 <button
                   type="button"
                   disabled={isBusy}
                   onClick={() => void onMarkAsRead(notification.id)}
                   aria-label="Mark notification as read"
-                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-label text-[10px] font-bold text-primary hover:bg-surface cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-1 font-label text-[10px] font-bold text-primary hover:bg-surface sm:py-0.5 cursor-pointer disabled:opacity-50"
                 >
                   <Check className="size-3" /> Read
                 </button>
@@ -136,7 +136,7 @@ export function NotificationItem({
                 <Link
                   href={href}
                   onClick={handleOpenLink}
-                  className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 font-label text-[10px] font-bold text-muted-foreground hover:bg-surface hover:text-primary"
+                  className="inline-flex items-center gap-0.5 rounded-full px-2 py-1 font-label text-[10px] font-bold text-muted-foreground hover:bg-surface hover:text-primary sm:py-0.5"
                 >
                   Open <ArrowUpRight className="size-3" />
                 </Link>

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { Bell } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -28,6 +29,8 @@ export function NotificationBell({ viewAllHref, className }: NotificationBellPro
     [pathname],
   );
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = React.useState<React.CSSProperties | null>(null);
 
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -48,11 +51,56 @@ export function NotificationBell({ viewAllHref, className }: NotificationBellPro
     markAllAsRead,
   } = useNotifications({ page: 1, limit: 10 });
 
+  const updateDropdownPosition = React.useCallback(() => {
+    if (typeof window === "undefined" || !containerRef.current) {
+      return;
+    }
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const horizontalGutter = viewportWidth < 640 ? 12 : 16;
+    const width = Math.max(240, Math.min(390, viewportWidth - horizontalGutter * 2));
+    const idealLeft = rect.right - width;
+    const left = Math.max(
+      horizontalGutter,
+      Math.min(idealLeft, viewportWidth - horizontalGutter - width),
+    );
+    const top = Math.max(12, Math.min(rect.bottom + 8, viewportHeight - 240));
+    const maxHeight = Math.max(220, viewportHeight - top - 16);
+
+    setDropdownStyle({
+      position: "fixed",
+      top,
+      left,
+      width,
+      maxHeight,
+    });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    updateDropdownPosition();
+    window.addEventListener("resize", updateDropdownPosition);
+    window.addEventListener("scroll", updateDropdownPosition, { capture: true, passive: true });
+
+    return () => {
+      window.removeEventListener("resize", updateDropdownPosition);
+      window.removeEventListener("scroll", updateDropdownPosition, { capture: true });
+    };
+  }, [open, updateDropdownPosition]);
+
   React.useEffect(() => {
     if (!open) return;
 
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node | null;
+      const insideTrigger = target ? (containerRef.current?.contains(target) ?? false) : false;
+      const insideDropdown = target ? (dropdownRef.current?.contains(target) ?? false) : false;
+      if (!insideTrigger && !insideDropdown) {
         setOpen(false);
       }
     };
@@ -108,20 +156,32 @@ export function NotificationBell({ viewAllHref, className }: NotificationBellPro
         ) : null}
       </button>
 
-      {open ? (
-        <NotificationDropdown
-          notifications={notifications}
-          unreadCount={unreadCount}
-          connectionStatus={connectionStatus}
-          userRole={user.role}
-          viewAllHref={resolvedViewAllHref}
-          isLoading={isLoading}
-          isMarkingAll={isMarkingAllAsRead}
-          onMarkAsRead={markAsRead}
-          onMarkAllAsRead={markAllAsRead}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div
+                aria-hidden="true"
+                onClick={() => setOpen(false)}
+                className="fixed inset-0 z-[55] bg-black/20 backdrop-blur-[1px] sm:hidden"
+              />
+              <NotificationDropdown
+                ref={dropdownRef}
+                style={dropdownStyle ?? undefined}
+                notifications={notifications}
+                unreadCount={unreadCount}
+                connectionStatus={connectionStatus}
+                userRole={user.role}
+                viewAllHref={resolvedViewAllHref}
+                isLoading={isLoading}
+                isMarkingAll={isMarkingAllAsRead}
+                onMarkAsRead={markAsRead}
+                onMarkAllAsRead={markAllAsRead}
+                onClose={() => setOpen(false)}
+              />
+            </>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
