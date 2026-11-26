@@ -176,15 +176,15 @@ function AdminPaymentsInner() {
     setOpenReceiptError(null);
     setReviewReference(
       record.verifiedReference ||
-        record.latestReceipt?.transactionReference ||
-        record.latestReceipt?.extractedReference ||
-        record.transactionReference ||
-        "",
+      record.latestReceipt?.transactionReference ||
+      record.latestReceipt?.extractedReference ||
+      record.transactionReference ||
+      "",
     );
     setReviewCbeToken(
       record.cbeReceiptToken ||
-        record.latestReceipt?.cbeReceiptToken ||
-        "",
+      record.latestReceipt?.cbeReceiptToken ||
+      "",
     );
   };
 
@@ -220,8 +220,8 @@ function AdminPaymentsInner() {
         setSelectedPayment(updatedRecord);
         setReviewCbeToken(
           updatedRecord.cbeReceiptToken ||
-            updatedRecord.latestReceipt?.cbeReceiptToken ||
-            "",
+          updatedRecord.latestReceipt?.cbeReceiptToken ||
+          "",
         );
       }
       addToast({
@@ -410,8 +410,8 @@ function AdminPaymentsInner() {
             {p.verifiedReference || p.transactionReference || "Not submitted yet"}
           </p>
           {p.extractedReference &&
-          p.extractedReference !== p.transactionReference &&
-          !p.verifiedReference ? (
+            p.extractedReference !== p.transactionReference &&
+            !p.verifiedReference ? (
             <p className="font-mono text-[11px] text-primary">
               OCR: {p.extractedReference}
             </p>
@@ -536,8 +536,8 @@ function AdminPaymentsInner() {
             type="button"
             variant={
               p.paymentStatus === "ReviewRequired" ||
-              p.latestReceipt?.status === "Pending" ||
-              p.latestReceipt?.status === "Manual Review"
+                p.latestReceipt?.status === "Pending" ||
+                p.latestReceipt?.status === "Manual Review"
                 ? "cta"
                 : "outline"
             }
@@ -993,7 +993,7 @@ function AdminPaymentsInner() {
                           ? "Payment has been confirmed by the payment provider API. The original receipt remains permanently stored for audit and dispute inspection."
                           : "Payment was manually approved after administrator review. The original receipt remains permanently stored for inspection."
                         : selectedPayment.latestReceipt.status === "Manual Review" ||
-                            selectedPayment.paymentStatus === "ReviewRequired"
+                          selectedPayment.paymentStatus === "ReviewRequired"
                           ? "Automatic verification requires administrator inspection. Open the full-resolution receipt to compare reference, amount, and receiving account."
                           : selectedPayment.latestReceipt.status === "Rejected"
                             ? "This submission was rejected. Rejected receipts and any replacement submissions are preserved in full below."
@@ -1003,26 +1003,26 @@ function AdminPaymentsInner() {
                     {(selectedPayment.failureReason ||
                       selectedPayment.latestReceipt.failureReason ||
                       selectedPayment.latestReceipt.rejectionReason) && (
-                      <div
-                        className={cn(
-                          "rounded-lg border px-3 py-2",
-                          selectedPayment.latestReceipt.status === "Rejected"
-                            ? "border-destructive/30 bg-destructive/10 text-destructive"
-                            : "border-amber-500/35 bg-amber-50/70 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100",
-                        )}
-                      >
-                        <span className="font-bold">
-                          {selectedPayment.latestReceipt.status === "Rejected"
-                            ? "Rejection / Failure Reason: "
-                            : "Auto-Verification Note: "}
-                        </span>
-                        <span>
-                          {selectedPayment.latestReceipt.rejectionReason ||
-                            selectedPayment.latestReceipt.failureReason ||
-                            selectedPayment.failureReason}
-                        </span>
-                      </div>
-                    )}
+                        <div
+                          className={cn(
+                            "rounded-lg border px-3 py-2",
+                            selectedPayment.latestReceipt.status === "Rejected"
+                              ? "border-destructive/30 bg-destructive/10 text-destructive"
+                              : "border-amber-500/35 bg-amber-50/70 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100",
+                          )}
+                        >
+                          <span className="font-bold">
+                            {selectedPayment.latestReceipt.status === "Rejected"
+                              ? "Rejection / Failure Reason: "
+                              : "Auto-Verification Note: "}
+                          </span>
+                          <span>
+                            {selectedPayment.latestReceipt.rejectionReason ||
+                              selectedPayment.latestReceipt.failureReason ||
+                              selectedPayment.failureReason}
+                          </span>
+                        </div>
+                      )}
 
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       <OpenOfficialReceiptButton
@@ -1090,9 +1090,9 @@ function AdminPaymentsInner() {
                         )}
                     </div>
                     {!selectedPayment.officialReceiptUrl &&
-                    !selectedPayment.latestReceipt.officialReceiptUrl &&
-                    (selectedPayment.officialReceiptReason ||
-                      selectedPayment.latestReceipt.officialReceiptReason) ? (
+                      !selectedPayment.latestReceipt.officialReceiptUrl &&
+                      (selectedPayment.officialReceiptReason ||
+                        selectedPayment.latestReceipt.officialReceiptReason) ? (
                       <div className="rounded-lg border border-amber-500/35 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
                         <span className="font-bold">Official Provider Link Unavailable: </span>
                         <span>
@@ -1217,7 +1217,7 @@ function AdminPaymentsInner() {
                         : selectedPayment.cbeReceiptToken
                           ? `CBE Token: ${selectedPayment.cbeReceiptToken}`
                           : selectedPayment.officialReceiptReason ||
-                            "No official provider receipt link available"}
+                          "No official provider receipt link available"}
                     </p>
                   </div>
                   <OpenOfficialReceiptButton
@@ -1462,9 +1462,9 @@ function AdminPaymentsInner() {
 
                             {/* OCR Extraction Details Box */}
                             {receipt.ocrCompletedAt ||
-                            receipt.extractedReference ||
-                            receipt.extractedAmountETB != null ||
-                            receipt.extractedQrData ? (
+                              receipt.extractedReference ||
+                              receipt.extractedAmountETB != null ||
+                              receipt.extractedQrData ? (
                               <div className="space-y-1.5 rounded-lg border border-border bg-surface p-2.5 text-[11px]">
                                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                                   <span className="inline-flex items-center gap-1 font-bold text-primary">
@@ -1472,7 +1472,6 @@ function AdminPaymentsInner() {
                                   </span>
                                   {receipt.ocrConfidence != null ? (
                                     <Badge variant="soft" className="text-[10px]">
-                                      {receipt.ocrConfidence}% confidence
                                     </Badge>
                                   ) : null}
                                 </div>
@@ -1505,24 +1504,24 @@ function AdminPaymentsInner() {
                                   </p>
                                   {(receipt.extractedSenderName ||
                                     receipt.extractedSenderAccount) && (
-                                    <p>
-                                      <span className="text-muted-foreground">Sender:</span>{" "}
-                                      <span className="text-foreground">
-                                        {receipt.extractedSenderName ||
-                                          receipt.extractedSenderAccount}
-                                      </span>
-                                    </p>
-                                  )}
+                                      <p>
+                                        <span className="text-muted-foreground">Sender:</span>{" "}
+                                        <span className="text-foreground">
+                                          {receipt.extractedSenderName ||
+                                            receipt.extractedSenderAccount}
+                                        </span>
+                                      </p>
+                                    )}
                                   {(receipt.extractedReceiverName ||
                                     receipt.extractedReceiverAccount) && (
-                                    <p>
-                                      <span className="text-muted-foreground">Receiver:</span>{" "}
-                                      <span className="text-foreground">
-                                        {receipt.extractedReceiverName ||
-                                          receipt.extractedReceiverAccount}
-                                      </span>
-                                    </p>
-                                  )}
+                                      <p>
+                                        <span className="text-muted-foreground">Receiver:</span>{" "}
+                                        <span className="text-foreground">
+                                          {receipt.extractedReceiverName ||
+                                            receipt.extractedReceiverAccount}
+                                        </span>
+                                      </p>
+                                    )}
                                 </div>
                                 {receipt.extractedQrData && (
                                   <p className="truncate font-mono text-[10px] text-muted-foreground">

@@ -967,7 +967,7 @@ export function PaymentReceiptSubmission({
                 {isSubmitting ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
-                    <span>Uploading &amp; Verifying with Payment Provider...</span>
+                    <span>Verifying Payment</span>
                   </>
                 ) : (
                   <>
