@@ -87,10 +87,14 @@ export function PaymentReceiptSubmission({
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const inFlightRef = React.useRef(false);
+  const scanRunIdRef = React.useRef(0);
 
   const [isDragging, setIsDragging] = React.useState(false);
   const [isProcessingImage, setIsProcessingImage] = React.useState(false);
   const [isRunningOcr, setIsRunningOcr] = React.useState(false);
+  const [ocrStatusMessage, setOcrStatusMessage] = React.useState(
+    "Scanning receipt with OCR & QR reader...",
+  );
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [isRetryingVerify, setIsRetryingVerify] = React.useState(false);
   const [isCameraOpen, setIsCameraOpen] = React.useState(false);
@@ -126,6 +130,8 @@ export function PaymentReceiptSubmission({
   } | null>(null);
 
   const clearStagedImage = React.useCallback(() => {
+    scanRunIdRef.current += 1;
+    setIsRunningOcr(false);
     setPrepared((prev) => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return null;
@@ -160,31 +166,65 @@ export function PaymentReceiptSubmission({
         setCaptureMethod(method);
         setIsProcessingImage(false);
 
+        const runId = ++scanRunIdRef.current;
         setIsRunningOcr(true);
+        setOcrStatusMessage("Scanning receipt with OCR & QR reader...");
         try {
-          const ocrFd = new FormData();
-          ocrFd.append("receipt", result.file, result.file.name);
-          ocrFd.append("orderId", orderNumber);
-          ocrFd.append("provider", providerId);
-          const extracted = await storeService.extractReceiptOcr(ocrFd);
-          setOcrResult(extracted);
-          if (extracted.extractedReference) {
-            setTxReference(extracted.extractedReference);
+          let serverExtracted: ReceiptOcrExtractionDto | null = null;
+          let serverFailureMessage: string | null = null;
+
+          try {
+            const ocrFd = new FormData();
+            ocrFd.append("receipt", result.file, result.file.name);
+            ocrFd.append("orderId", orderNumber);
+            ocrFd.append("provider", providerId);
+            serverExtracted = await storeService.extractReceiptOcr(ocrFd);
+          } catch (ocrErr: unknown) {
+            const rawMsg = ocrErr instanceof Error ? ocrErr.message : "";
+            const isTransientNetworkOrGateway =
+              !rawMsg ||
+              rawMsg.includes("Failed to fetch") ||
+              rawMsg.includes("status 502") ||
+              rawMsg.includes("status 503") ||
+              rawMsg.includes("status 504");
+            serverFailureMessage = isTransientNetworkOrGateway
+              ? "Automatic receipt scanning is temporarily unavailable. You can enter your transaction reference manually below or submit for manual review."
+              : rawMsg;
           }
-        } catch (ocrErr: unknown) {
-          const rawMsg = ocrErr instanceof Error ? ocrErr.message : "";
-          const isTransientNetworkOrGateway =
-            !rawMsg ||
-            rawMsg.includes("Failed to fetch") ||
-            rawMsg.includes("status 502") ||
-            rawMsg.includes("status 503") ||
-            rawMsg.includes("status 504");
-          const msg = isTransientNetworkOrGateway
-            ? "Automatic receipt scanning is temporarily unavailable. You can enter your transaction reference manually below or submit for manual review."
-            : rawMsg;
-          setOcrError(msg);
+
+          if (scanRunIdRef.current !== runId) return;
+
+          let finalExtracted = serverExtracted;
+          if (!result.isPdf && !serverExtracted?.extractionSucceeded) {
+            setOcrStatusMessage("Running on-device receipt OCR & QR scan...");
+            const { extractReceiptInBrowser, mergeReceiptOcrResults } = await import(
+              "@/utils/browser-receipt-ocr"
+            );
+            const browserExtracted = await extractReceiptInBrowser(
+              result.file,
+              providerId,
+              serverExtracted?.extractedQrData ?? null,
+            ).catch(() => null);
+
+            if (scanRunIdRef.current !== runId) return;
+            if (browserExtracted) {
+              finalExtracted = mergeReceiptOcrResults(serverExtracted, browserExtracted);
+            }
+          }
+
+          if (finalExtracted) {
+            setOcrResult(finalExtracted);
+            setOcrError(null);
+            if (finalExtracted.extractedReference) {
+              setTxReference(finalExtracted.extractedReference);
+            }
+          } else if (serverFailureMessage) {
+            setOcrError(serverFailureMessage);
+          }
         } finally {
-          setIsRunningOcr(false);
+          if (scanRunIdRef.current === runId) {
+            setIsRunningOcr(false);
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Could not load selected image.";
@@ -247,6 +287,12 @@ export function PaymentReceiptSubmission({
       }
       if (ocrResult?.extractedQrData) {
         formData.append("qrData", ocrResult.extractedQrData);
+      }
+      if (ocrResult?.extractedOfficialReceiptUrl) {
+        formData.append("officialReceiptUrl", ocrResult.extractedOfficialReceiptUrl);
+      }
+      if (ocrResult?.extractedCbeToken) {
+        formData.append("cbeReceiptToken", ocrResult.extractedCbeToken);
       }
       if (payerPhone.trim()) {
         formData.append("phoneNumber", payerPhone.trim());
@@ -746,7 +792,7 @@ export function PaymentReceiptSubmission({
                     <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3 text-primary">
                       <Loader2 className="size-4 animate-spin shrink-0" />
                       <div>
-                        <p className="font-bold">Scanning receipt with OCR &amp; QR reader...</p>
+                        <p className="font-bold">{ocrStatusMessage}</p>
                         <p className="text-[11px] opacity-80">
                           Detecting transaction ID, amount, sender, and date.
                         </p>
