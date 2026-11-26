@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { notificationIdParamSchema } from "@addisgebeya/validation";
 import { Server as SocketIOServer } from "socket.io";
-import { env } from "../config/env.js";
+import { isOriginAllowed } from "../config/cors.js";
 import { notificationService } from "../modules/notifications/notification.service.js";
 import { logger } from "../utils/logger.js";
 import { authenticateSocket } from "./socket.auth.js";
@@ -17,11 +17,6 @@ import {
   type SocketData,
   type TypedSocketIOServer,
 } from "./socket.events.js";
-
-const allowedOrigins = env.frontendUrl
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
 
 const ALLOWED_CLIENT_EVENTS = new Set<string>([
   SOCKET_EVENTS.NOTIFICATION_SYNC,
@@ -53,10 +48,11 @@ export function initSocketServer(httpServer: HttpServer): TypedSocketIOServer {
   >(httpServer, {
     cors: {
       origin(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (isOriginAllowed(origin)) {
           callback(null, true);
           return;
         }
+        logger.warn("Socket.IO connection rejected by CORS policy", { origin });
         callback(new Error(`Socket origin ${origin} is not allowed by CORS policy`));
       },
       credentials: true,

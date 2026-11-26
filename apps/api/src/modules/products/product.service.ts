@@ -22,7 +22,7 @@ export interface ProductFilters {
   sortBy?: "featured" | "newest" | "best_selling" | "price_low" | "price_high" | "rating";
 }
 
-function inferShoeTypeFromCategory(categorySlug?: string): string {
+function inferShoeTypeFromCategory(categorySlug?: string | null): string {
   switch (categorySlug) {
     case "running":
       return "Running";
@@ -215,8 +215,8 @@ export class ProductService {
   async createProduct(rawData: Record<string, unknown>) {
     const data = createProductSchema.parse(rawData);
 
-    let categoryId = data.categoryId;
-    let resolvedCategorySlug = data.categorySlug;
+    let categoryId = data.categoryId ?? undefined;
+    let resolvedCategorySlug = data.categorySlug ?? undefined;
     if (!categoryId && data.categorySlug) {
       const cat = await prisma.category.findUnique({ where: { slug: data.categorySlug } });
       if (cat) {

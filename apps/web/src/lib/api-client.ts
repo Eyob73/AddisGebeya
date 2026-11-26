@@ -1,15 +1,22 @@
-import type { ApiErrorResponse, ApiSuccessResponse } from "@addisgebeya/types";
+import type { ApiErrorDetail, ApiErrorResponse, ApiSuccessResponse } from "@addisgebeya/types";
 import { clientEnv } from "./env";
 
 export class ApiClientError extends Error {
   public readonly status: number;
   public readonly code: string;
+  public readonly errors?: ApiErrorDetail[];
 
-  constructor(message: string, status: number, code = "API_ERROR") {
+  constructor(
+    message: string,
+    status: number,
+    code = "API_ERROR",
+    errors?: ApiErrorDetail[],
+  ) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     this.code = code;
+    this.errors = errors;
   }
 }
 
@@ -171,10 +178,16 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
 
   if (!response.ok || !payload || !payload.success) {
     const errorPayload = payload && !payload.success ? payload : null;
+    const detailSummary = errorPayload?.errors
+      ?.map((detail) => (detail.field ? `${detail.field}: ${detail.message}` : detail.message))
+      .filter(Boolean)
+      .join("; ");
+    const baseMessage = errorPayload?.message ?? `Request failed with status ${response.status}`;
     throw new ApiClientError(
-      errorPayload?.message ?? `Request failed with status ${response.status}`,
+      detailSummary ? `${baseMessage} (${detailSummary})` : baseMessage,
       response.status,
       errorPayload?.code ?? "REQUEST_FAILED",
+      errorPayload?.errors,
     );
   }
 

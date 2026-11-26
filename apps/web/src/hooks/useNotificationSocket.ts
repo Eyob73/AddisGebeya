@@ -97,6 +97,7 @@ export function useNotificationSocket() {
     const socket = io(clientEnv.socketUrl, {
       auth: { token },
       transports: ["websocket", "polling"],
+      tryAllTransports: true,
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,

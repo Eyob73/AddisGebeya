@@ -578,7 +578,7 @@ export function ProductFormView({ existingProduct }: ProductFormViewProps) {
           categoryName: selectedCategoryObj?.name ?? "Footwear",
           gender: (gender as GenderCategory) || "Unisex",
           shoeType: shoeType.trim(),
-          material: resolvedMaterialText,
+          material: resolvedMaterialText ?? "",
           tagline: tagline.trim(),
           description: description.trim(),
           priceETB: numPrice,
