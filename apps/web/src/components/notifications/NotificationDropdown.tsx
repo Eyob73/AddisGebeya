@@ -60,8 +60,6 @@ export function NotificationDropdown({
                 : "bg-surface-container text-muted-foreground",
             )}
           >
-            {isLive ? <Wifi className="size-2.5" /> : <WifiOff className="size-2.5" />}
-            <span>{isLive ? "Live" : "Sync"}</span>
           </span>
         </div>
 

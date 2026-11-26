@@ -172,10 +172,16 @@ export function PaymentReceiptSubmission({
             setTxReference(extracted.extractedReference);
           }
         } catch (ocrErr: unknown) {
-          const msg =
-            ocrErr instanceof Error
-              ? ocrErr.message
-              : "Could not scan receipt automatically. You can enter your transaction reference manually.";
+          const rawMsg = ocrErr instanceof Error ? ocrErr.message : "";
+          const isTransientNetworkOrGateway =
+            !rawMsg ||
+            rawMsg.includes("Failed to fetch") ||
+            rawMsg.includes("status 502") ||
+            rawMsg.includes("status 503") ||
+            rawMsg.includes("status 504");
+          const msg = isTransientNetworkOrGateway
+            ? "Automatic receipt scanning is temporarily unavailable. You can enter your transaction reference manually below or submit for manual review."
+            : rawMsg;
           setOcrError(msg);
         } finally {
           setIsRunningOcr(false);
@@ -920,7 +926,7 @@ export function PaymentReceiptSubmission({
                 ) : (
                   <>
                     <ShieldCheck className="size-4" />
-                    <span>Confirm &amp; Verify Payment Receipt</span>
+                    <span>Confirm &amp; Verify Payment</span>
                   </>
                 )}
               </Button>

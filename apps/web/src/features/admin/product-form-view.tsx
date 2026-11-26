@@ -428,9 +428,6 @@ export function ProductFormView({ existingProduct }: ProductFormViewProps) {
     if (!shoeType.trim()) {
       errors.shoeType = "Select a shoe type (e.g., Sneakers, Formal, Sports).";
     }
-    if (!description.trim() || description.trim().length < 5) {
-      errors.description = "Provide a product description (at least 5 characters).";
-    }
     if (numPrice <= 0) {
       errors.priceETB = "Selling price must be greater than 0 ETB.";
     }
@@ -1021,29 +1018,14 @@ export function ProductFormView({ existingProduct }: ProductFormViewProps) {
 
               <div>
                 <label className="mb-1.5 block font-label text-xs font-bold">
-                  Product Description <span className="text-cta">*</span>
+                  Product Description
                 </label>
                 <Textarea
                   rows={4}
                   value={description}
-                  onChange={(e) => {
-                    setDescription(e.target.value);
-                    if (fieldErrors.description) {
-                      setFieldErrors((p) => {
-                        const next = { ...p };
-                        delete next.description;
-                        return next;
-                      });
-                    }
-                  }}
-                  placeholder="Enter detailed product description, cushioning profile, and craftsmanship heritage..."
-                  className={cn(fieldErrors.description && "border-destructive")}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Optional — enter detailed product description, cushioning profile, and craftsmanship heritage..."
                 />
-                {fieldErrors.description ? (
-                  <p className="mt-1 text-[11px] font-medium text-destructive">
-                    {fieldErrors.description}
-                  </p>
-                ) : null}
               </div>
             </div>
           </section>

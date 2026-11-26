@@ -14,7 +14,7 @@ export const ALLOWED_RECEIPT_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "pdf"] 
 
 export const MAX_RECEIPT_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
 const COMPRESSION_THRESHOLD_BYTES = 900 * 1024; // Compress files > ~900 KB or oversized dimensions
-const MAX_RECEIPT_DIMENSION = 1800; // Preserves crisp bank reference numbers & QR codes
+const MAX_RECEIPT_DIMENSION = 1440; // Preserves crisp bank reference numbers & QR codes while bounding server decode memory
 
 export interface ReceiptValidationResult {
   valid: boolean;

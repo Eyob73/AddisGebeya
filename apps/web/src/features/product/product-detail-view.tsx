@@ -674,9 +674,11 @@ export function ProductDetailView({ slug }: { slug: string }) {
                 <h2 className="font-display text-2xl font-bold text-foreground">
                   Engineered for High-Altitude Paces and City Demands
                 </h2>
-                <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-                  {product.description}
-                </p>
+                {product.description ? (
+                  <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
+                    {product.description}
+                  </p>
+                ) : null}
                 <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2">
                   <div className="rounded-xl bg-surface-low p-4">
                     <span className="font-display text-sm font-bold text-primary">
