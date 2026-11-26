@@ -98,7 +98,7 @@ export interface PaymentReceiptDto {
   paymentId: string;
   orderId: string;
   orderNumber: string;
-  userId: string;
+  userId: string | null;
   customerName?: string;
   provider: string;
   transactionReference?: string | null;

@@ -4,6 +4,7 @@ import { prisma } from "../../config/database.js";
 import { AppError } from "../../utils/app-error.js";
 import { mapProductToShoeProduct } from "./product.mapper.js";
 import { cloudinaryService } from "../media/cloudinary.service.js";
+import { notificationService } from "../notifications/notification.service.js";
 
 export interface ProductFilters {
   search?: string;
@@ -344,23 +345,102 @@ export class ProductService {
   }
 
   async updateSizeStock(productId: string, colorwayId: string, size: number, quantity: number) {
-    const variant = await prisma.productVariant.upsert({
-      where: {
-        colorwayId_size: {
+    const nextStock = Math.max(0, Math.floor(quantity));
+
+    const variant = await prisma.$transaction(async (tx) => {
+      const existingVariant = await tx.productVariant.findUnique({
+        where: {
+          colorwayId_size: {
+            colorwayId,
+            size,
+          },
+        },
+        include: {
+          product: { select: { name: true, sku: true } },
+          colorway: { select: { name: true } },
+        },
+      });
+
+      const updated = await tx.productVariant.upsert({
+        where: {
+          colorwayId_size: {
+            colorwayId,
+            size,
+          },
+        },
+        update: {
+          stockQuantity: nextStock,
+        },
+        create: {
+          productId,
           colorwayId,
           size,
+          stockQuantity: nextStock,
         },
-      },
-      update: {
-        stockQuantity: Math.max(0, Math.floor(quantity)),
-      },
-      create: {
-        productId,
-        colorwayId,
-        size,
-        stockQuantity: Math.max(0, Math.floor(quantity)),
-      },
+        include: {
+          product: { select: { name: true, sku: true } },
+          colorway: { select: { name: true } },
+        },
+      });
+
+      const prevStock = existingVariant?.stockQuantity ?? null;
+      const threshold = updated.lowStockThreshold;
+      const productName = updated.product?.name ?? "Product";
+      const colorwayName = updated.colorway?.name ?? "Colorway";
+      const sku = updated.sku ?? updated.product?.sku ?? productId;
+
+      if (nextStock === 0 && (prevStock === null || prevStock > 0)) {
+        await notificationService.notifyAdmins(
+          {
+            title: `Out of Stock — ${productName}`,
+            message: `${productName} (${colorwayName}, EU ${size}) is now out of stock (0 pairs remaining).`,
+            type: "admin_inventory_out_of_stock",
+            relatedEntityId: productId,
+            relatedEntityType: "product",
+            metadata: {
+              productId,
+              variantId: updated.id,
+              sku,
+              colorwayName,
+              size,
+              stockQuantity: 0,
+              lowStockThreshold: threshold,
+            },
+            idempotencyKey: `admin-inventory-oos:${updated.id}:${updated.updatedAt.getTime()}`,
+          },
+          tx,
+        );
+      } else if (
+        nextStock > 0 &&
+        nextStock <= threshold &&
+        (prevStock === null || prevStock > threshold)
+      ) {
+        await notificationService.notifyAdmins(
+          {
+            title: `Low Stock Alert — ${productName}`,
+            message: `${productName} (${colorwayName}, EU ${size}) reached low-stock threshold (${nextStock} pair(s) remaining; threshold: ${threshold}).`,
+            type: "admin_inventory_low_stock",
+            relatedEntityId: productId,
+            relatedEntityType: "product",
+            metadata: {
+              productId,
+              variantId: updated.id,
+              sku,
+              colorwayName,
+              size,
+              stockQuantity: nextStock,
+              lowStockThreshold: threshold,
+            },
+            idempotencyKey: `admin-inventory-low:${updated.id}:${updated.updatedAt.getTime()}`,
+          },
+          tx,
+        );
+      }
+
+      return updated;
     });
+
+    void notificationService.flushOutbox();
 
     return variant;
   }
@@ -483,7 +563,19 @@ export class ProductService {
 
             for (const [sizeStr, qty] of sizeEntries) {
               const sizeNum = Number(sizeStr);
-              await tx.productVariant.upsert({
+              const nextStock = Math.max(0, Math.floor(Number(qty) || 0));
+              const nextThreshold = cw.lowStockThreshold ?? 2;
+              const prevVariant = await tx.productVariant.findUnique({
+                where: {
+                  colorwayId_size: {
+                    colorwayId: cw.id,
+                    size: sizeNum,
+                  },
+                },
+                select: { id: true, stockQuantity: true, lowStockThreshold: true, sku: true },
+              });
+
+              const upsertedVariant = await tx.productVariant.upsert({
                 where: {
                   colorwayId_size: {
                     colorwayId: cw.id,
@@ -491,18 +583,69 @@ export class ProductService {
                   },
                 },
                 update: {
-                  stockQuantity: Math.max(0, Math.floor(Number(qty) || 0)),
-                  lowStockThreshold: cw.lowStockThreshold ?? 2,
+                  stockQuantity: nextStock,
+                  lowStockThreshold: nextThreshold,
                 },
                 create: {
                   productId: id,
                   colorwayId: cw.id,
                   size: sizeNum,
-                  stockQuantity: Math.max(0, Math.floor(Number(qty) || 0)),
-                  lowStockThreshold: cw.lowStockThreshold ?? 2,
+                  stockQuantity: nextStock,
+                  lowStockThreshold: nextThreshold,
                   sku: `${effectiveSku}-${idx + 1}-${sizeNum}`,
                 },
               });
+
+              const prevStock = prevVariant?.stockQuantity ?? null;
+              const effectiveName = patch.name ?? existingProduct.name;
+              const effectiveCwName = cw.name || "Colorway";
+              if (nextStock === 0 && (prevStock === null || prevStock > 0)) {
+                await notificationService.notifyAdmins(
+                  {
+                    title: `Out of Stock — ${effectiveName}`,
+                    message: `${effectiveName} (${effectiveCwName}, EU ${sizeNum}) is now out of stock (0 pairs remaining).`,
+                    type: "admin_inventory_out_of_stock",
+                    relatedEntityId: id,
+                    relatedEntityType: "product",
+                    metadata: {
+                      productId: id,
+                      variantId: upsertedVariant.id,
+                      sku: upsertedVariant.sku ?? effectiveSku,
+                      colorwayName: effectiveCwName,
+                      size: sizeNum,
+                      stockQuantity: 0,
+                      lowStockThreshold: nextThreshold,
+                    },
+                    idempotencyKey: `admin-inventory-oos:${upsertedVariant.id}:${upsertedVariant.updatedAt.getTime()}`,
+                  },
+                  tx,
+                );
+              } else if (
+                nextStock > 0 &&
+                nextStock <= nextThreshold &&
+                (prevStock === null || prevStock > nextThreshold)
+              ) {
+                await notificationService.notifyAdmins(
+                  {
+                    title: `Low Stock Alert — ${effectiveName}`,
+                    message: `${effectiveName} (${effectiveCwName}, EU ${sizeNum}) reached low-stock threshold (${nextStock} pair(s) remaining; threshold: ${nextThreshold}).`,
+                    type: "admin_inventory_low_stock",
+                    relatedEntityId: id,
+                    relatedEntityType: "product",
+                    metadata: {
+                      productId: id,
+                      variantId: upsertedVariant.id,
+                      sku: upsertedVariant.sku ?? effectiveSku,
+                      colorwayName: effectiveCwName,
+                      size: sizeNum,
+                      stockQuantity: nextStock,
+                      lowStockThreshold: nextThreshold,
+                    },
+                    idempotencyKey: `admin-inventory-low:${upsertedVariant.id}:${upsertedVariant.updatedAt.getTime()}`,
+                  },
+                  tx,
+                );
+              }
             }
           } else {
             const newColorwayId =
@@ -596,6 +739,8 @@ export class ProductService {
         },
       });
     });
+
+    void notificationService.flushOutbox();
 
     return mapProductToShoeProduct(updated);
   }

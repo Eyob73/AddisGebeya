@@ -46,6 +46,23 @@ export const adminController = {
     sendSuccess(res, updated, "Payment review recorded successfully");
   }),
 
+  refundPayment: asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new AppError({
+        message: "Admin authentication required",
+        statusCode: HTTP_STATUS.UNAUTHORIZED,
+        code: "UNAUTHORIZED",
+      });
+    }
+    const paymentId = strParam(req.params.paymentId);
+    const updated = await paymentVerificationService.processRefund(
+      paymentId,
+      req.user.id,
+      req.body,
+    );
+    sendSuccess(res, updated, "Payment refund updated successfully");
+  }),
+
   listPaymentProviderConfigs: asyncHandler(async (_req: Request, res: Response) => {
     const configs = await paymentVerificationService.listProviderConfigs();
     sendSuccess(res, configs, "Payment provider configurations retrieved");

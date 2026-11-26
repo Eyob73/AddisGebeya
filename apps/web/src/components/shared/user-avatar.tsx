@@ -38,6 +38,7 @@ export function UserAvatar({
       <img
         src={resolvedUrl}
         alt={alt}
+        referrerPolicy="no-referrer"
         onError={() => setFailedUrl(resolvedUrl)}
         className={cn(roundedClassName, "shrink-0 object-cover", className, uploadedClassName)}
       />

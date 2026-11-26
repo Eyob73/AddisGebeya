@@ -22,34 +22,39 @@ const paymentRouter: Router = Router();
 
 // Cheki provider discovery & bank verification flow
 paymentRouter.get("/providers", paymentController.getProviders);
-paymentRouter.post("/verify", requireAuth, paymentVerifyRateLimiter, paymentController.verifyPayment);
-paymentRouter.get("/status/:orderId", requireAuth, paymentController.getPaymentStatus);
+paymentRouter.post(
+  "/verify",
+  optionalAuth,
+  paymentVerifyRateLimiter,
+  paymentController.verifyPayment,
+);
+paymentRouter.get("/status/:orderId", optionalAuth, paymentController.getPaymentStatus);
 
 // Payment receipt OCR preview, upload/auto-verification, listing & authorized image/PDF retrieval
 paymentRouter.post(
   "/receipts/extract",
-  requireAuth,
+  optionalAuth,
   receiptUploadRateLimiter,
   uploadReceiptMedia.single("receipt"),
   paymentController.extractReceiptOcr,
 );
 paymentRouter.post(
   "/receipts",
-  requireAuth,
+  optionalAuth,
   receiptUploadRateLimiter,
   uploadReceiptMedia.single("receipt"),
   paymentController.submitReceipt,
 );
 paymentRouter.post(
   "/receipts/:receiptId/verify",
-  requireAuth,
+  optionalAuth,
   paymentVerifyRateLimiter,
   paymentController.verifyReceiptById,
 );
-paymentRouter.get("/receipts/order/:orderId", requireAuth, paymentController.getOrderReceipts);
+paymentRouter.get("/receipts/order/:orderId", optionalAuth, paymentController.getOrderReceipts);
 paymentRouter.post(
   "/receipts/:receiptId/access",
-  requireAuth,
+  optionalAuth,
   paymentController.createReceiptAccessUrl,
 );
 paymentRouter.get(

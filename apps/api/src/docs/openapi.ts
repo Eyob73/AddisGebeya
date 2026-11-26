@@ -119,6 +119,57 @@ export const openApiSpec = {
         },
       },
     },
+    "/auth/google": {
+      get: {
+        summary: "Initiate Google OAuth 2.0 authentication (login or registration)",
+        tags: ["Authentication"],
+        parameters: [
+          {
+            name: "intent",
+            in: "query",
+            schema: { type: "string", enum: ["login", "register"], default: "login" },
+          },
+          {
+            name: "from",
+            in: "query",
+            schema: { type: "string", example: "/checkout" },
+          },
+        ],
+        responses: {
+          "302": { description: "Redirects to Google OAuth 2.0 consent screen" },
+          "503": { description: "Google OAuth not configured" },
+        },
+      },
+    },
+    "/auth/google/config": {
+      get: {
+        summary: "Retrieve public Google Identity Services configuration (client ID and enabled flag)",
+        tags: ["Authentication"],
+        responses: {
+          "200": { description: "Public Google OAuth client configuration" },
+        },
+      },
+    },
+    "/auth/google/one-tap": {
+      post: {
+        summary: "Verify Google One Tap / GIS ID token credential and issue application JWT + refresh cookie",
+        tags: ["Authentication"],
+        responses: {
+          "200": { description: "Authenticated with Google One Tap" },
+          "401": { description: "Invalid or unverified Google credential" },
+          "403": { description: "CSRF/origin mismatch or deactivated account" },
+        },
+      },
+    },
+    "/auth/google/callback": {
+      get: {
+        summary: "Handle Google OAuth 2.0 callback, verify ID token, set HTTP-only refresh cookie, and redirect",
+        tags: ["Authentication"],
+        responses: {
+          "302": { description: "Redirects back to frontend OAuth callback route" },
+        },
+      },
+    },
     "/auth/refresh-token": {
       post: {
         summary: "Rotate refresh token & issue new access token",
@@ -192,6 +243,16 @@ export const openApiSpec = {
         },
       },
     },
+    "/cart/merge": {
+      post: {
+        summary: "Merge guest session and local bag items into authenticated customer cart",
+        tags: ["Cart"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Merged cart with live pricing and stock validation" },
+        },
+      },
+    },
     "/wishlist": {
       get: {
         summary: "Retrieve customer wishlist",
@@ -216,6 +277,16 @@ export const openApiSpec = {
         tags: ["Orders"],
         responses: {
           "201": { description: "Order created" },
+        },
+      },
+    },
+    "/orders/track": {
+      post: {
+        summary: "Track an order publicly using order number and customer email address",
+        tags: ["Orders"],
+        responses: {
+          "200": { description: "Matching order details and tracking timeline" },
+          "404": { description: "No matching order found" },
         },
       },
     },
@@ -357,6 +428,68 @@ export const openApiSpec = {
         security: [{ bearerAuth: [] }],
         responses: {
           "200": { description: "Dashboard analytics" },
+        },
+      },
+    },
+    "/notifications": {
+      get: {
+        summary: "List authenticated user's notifications with pagination and filtering",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Paginated notifications and unread count" },
+        },
+      },
+      post: {
+        summary: "Dispatch or broadcast notification (Admin only)",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "201": { description: "Notification dispatched" },
+        },
+      },
+    },
+    "/notifications/unread-count": {
+      get: {
+        summary: "Get authenticated user's unread notification count",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Unread count" },
+        },
+      },
+    },
+    "/notifications/read-all": {
+      patch: {
+        summary: "Mark all user notifications as read",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "All notifications marked as read" },
+        },
+      },
+    },
+    "/notifications/{id}/read": {
+      patch: {
+        summary: "Mark a specific owned notification as read",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Notification marked as read" },
+          "403": { description: "Forbidden" },
+          "404": { description: "Notification not found" },
+        },
+      },
+    },
+    "/notifications/{id}": {
+      delete: {
+        summary: "Delete a specific owned notification",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Notification deleted" },
+          "403": { description: "Forbidden" },
+          "404": { description: "Notification not found" },
         },
       },
     },

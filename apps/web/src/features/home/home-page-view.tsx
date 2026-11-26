@@ -16,7 +16,6 @@ import {
   MapPin,
   MessageCircle,
   Pencil,
-  RotateCcw,
   ShieldCheck,
   Star,
   Truck,
@@ -71,7 +70,7 @@ export function HomePageView() {
   const storeSettings = useCatalogStore((s) => s.settings);
   const settings = liveSettings ?? storeSettings;
 
-  const heroImageUrl = settings.heroImageUrl?.trim() || HERO_ASSETS.heroSneaker;
+  const heroImageUrl = settings.heroImageUrl?.trim() || "";
   const heroBadgeText = settings.heroBadgeText?.trim() || "Addis Stock Ready";
   const heroCardSubtitle = settings.heroCardSubtitle?.trim() || "New Arrival • Track Spec";
   const heroCardTitle = settings.heroCardTitle?.trim() || "Addis Velocity Pro Nitro";
@@ -337,12 +336,19 @@ export function HomePageView() {
                 <div className="pointer-events-none absolute -bottom-10 -left-10 size-64 rounded-full bg-cta/15 blur-2xl" />
 
                 <div className="relative flex h-[380px] sm:h-[430px] w-full items-center justify-center overflow-hidden rounded-xl bg-surface-container">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={heroImageUrl}
-                    alt={heroCardTitle}
-                    className="size-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  />
+                  {heroImageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={heroImageUrl}
+                      alt={heroCardTitle}
+                      className="size-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div
+                      aria-hidden="true"
+                      className="size-full bg-gradient-to-br from-surface-container via-surface-low to-primary/10"
+                    />
+                  )}
 
                   {/* Floating Interactive Price Pill */}
                   <Link
@@ -906,13 +912,19 @@ export function HomePageView() {
               <label className="block font-semibold text-foreground">
                 Right-Side Hero Image Preview
               </label>
-              <div className="relative h-48 w-full overflow-hidden rounded-xl border border-border bg-surface-container">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={heroForm.heroImageUrl.trim() || HERO_ASSETS.heroSneaker}
-                  alt={heroForm.heroCardTitle || "Homepage hero preview"}
-                  className="size-full object-cover"
-                />
+              <div className="relative flex h-48 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-container">
+                {heroForm.heroImageUrl.trim() ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={heroForm.heroImageUrl.trim()}
+                    alt={heroForm.heroCardTitle || "Homepage hero preview"}
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <p className="px-4 text-center text-muted-foreground">
+                    No hero image configured. Upload an image or paste an image URL below.
+                  </p>
+                )}
               </div>
               <input
                 ref={heroFileInputRef}
@@ -936,18 +948,20 @@ export function HomePageView() {
                   )}
                   <span>{isUploadingHeroImage ? "Uploading..." : "Upload New Image"}</span>
                 </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={isUploadingHeroImage || isSavingHero}
-                  onClick={() =>
-                    setHeroForm((f) => ({ ...f, heroImageUrl: HERO_ASSETS.heroSneaker }))
-                  }
-                >
-                  <RotateCcw className="size-3.5" />
-                  <span>Reset Default Image</span>
-                </Button>
+                {heroForm.heroImageUrl.trim() ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isUploadingHeroImage || isSavingHero}
+                    onClick={() =>
+                      setHeroForm((f) => ({ ...f, heroImageUrl: "" }))
+                    }
+                  >
+                    <XCircle className="size-3.5" />
+                    <span>Clear Image</span>
+                  </Button>
+                ) : null}
               </div>
             </div>
 

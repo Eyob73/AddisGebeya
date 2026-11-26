@@ -1,8 +1,9 @@
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import { API_PREFIX, APP_NAME } from "@addisgebeya/shared";
 import { createApp } from "./app.js";
 import { disconnectDatabase, verifyDatabaseConnection } from "./config/database.js";
 import { env } from "./config/env.js";
+import { closeSocketServer, initSocketServer } from "./socket/socket.server.js";
 import { logger } from "./utils/logger.js";
 
 let server: Server | undefined;
@@ -10,6 +11,8 @@ let isShuttingDown = false;
 
 async function bootstrap(): Promise<void> {
   const app = createApp();
+  const httpServer = createServer(app);
+  initSocketServer(httpServer);
 
   const dbCheck = await verifyDatabaseConnection();
   logger.info(
@@ -17,10 +20,11 @@ async function bootstrap(): Promise<void> {
     dbCheck.latencyMs !== undefined ? { latencyMs: dbCheck.latencyMs } : undefined,
   );
 
-  server = app.listen(env.port, () => {
+  server = httpServer.listen(env.port, () => {
     logger.info(`${APP_NAME} API running on http://localhost:${env.port}${API_PREFIX}`, {
       environment: env.nodeEnv,
       frontendUrl: env.frontendUrl,
+      realtime: "Socket.IO enabled",
     });
   });
 }
@@ -40,7 +44,9 @@ async function shutdown(signal: string): Promise<void> {
   forceExitTimer.unref();
 
   try {
-    if (server) {
+    await closeSocketServer();
+
+    if (server?.listening) {
       await new Promise<void>((resolve, reject) => {
         server?.close((err) => {
           if (err) {

@@ -1,18 +1,34 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
+import { useIsMounted } from "@/hooks/use-is-mounted";
+import { useCartStore } from "@/stores/cart.store";
 import { useUiStore } from "@/stores/ui.store";
 import { cn } from "@/lib/utils";
 
 export function ToastViewport() {
+  const isMounted = useIsMounted();
+  const pathname = usePathname();
+  const hasCartItems = useCartStore((s) => s.items.length > 0);
   const { toasts, removeToast } = useUiStore();
+
+  const shiftAboveOpenCart =
+    isMounted &&
+    hasCartItems &&
+    pathname !== "/cart" &&
+    pathname !== "/checkout" &&
+    !pathname.startsWith("/admin");
 
   if (toasts.length === 0) return null;
 
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed right-4 bottom-4 z-[60] flex w-full max-w-sm flex-col gap-2.5 px-2 sm:right-6 sm:bottom-6 sm:px-0"
+      className={cn(
+        "pointer-events-none fixed right-4 z-[60] flex w-full max-w-sm flex-col gap-2.5 px-2 sm:right-6 sm:px-0",
+        shiftAboveOpenCart ? "bottom-22 sm:bottom-24" : "bottom-4 sm:bottom-6",
+      )}
     >
       {toasts.map((toast) => {
         const Icon =

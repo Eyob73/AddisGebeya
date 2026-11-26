@@ -1,8 +1,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { CartMergeResponse } from "@addisgebeya/types";
 import { apiClient } from "@/lib/api-client";
 import { storeService } from "@/services/store.service";
 import type { AccessoryItem, CartItem, PromoCode, ShoeProduct } from "@/types/store.types";
+
+export interface CartMergeResult {
+  warnings: string[];
+  mergedCount: number;
+}
+
+let inFlightCartMergePromise: Promise<CartMergeResult> | null = null;
 
 interface CartState {
   items: CartItem[];
@@ -11,6 +19,7 @@ interface CartState {
   deliverySpeed: "standard" | "vip";
   isSyncing: boolean;
   syncFromBackend: () => Promise<void>;
+  mergeWithBackend: () => Promise<CartMergeResult>;
   addItem: (
     product: ShoeProduct,
     colorwayId: string,
@@ -41,14 +50,59 @@ export const useCartStore = create<CartState>()(
         set({ isSyncing: true });
         try {
           const res = await apiClient.get<{ id: string; items: CartItem[] }>("/cart");
+          const localAccessories = get().items.filter((i) => Boolean(i.isAccessory));
           if (res?.items && Array.isArray(res.items) && res.items.length > 0) {
-            set({ items: res.items });
+            set({ items: [...res.items, ...localAccessories] });
           }
         } catch {
           // Retain local bag on network glitch
         } finally {
           set({ isSyncing: false });
         }
+      },
+
+      mergeWithBackend: async () => {
+        if (inFlightCartMergePromise) {
+          return inFlightCartMergePromise;
+        }
+
+        inFlightCartMergePromise = (async () => {
+          set({ isSyncing: true });
+          try {
+            const currentItems = get().items;
+            const localAccessories = currentItems.filter((i) => Boolean(i.isAccessory));
+            const localShoeItems = currentItems
+              .filter((i) => !i.isAccessory && i.productId && i.colorwayId && i.size > 0)
+              .map((i) => ({
+                productId: i.productId,
+                colorwayId: i.colorwayId,
+                size: i.size,
+                quantity: i.quantity,
+              }));
+
+            const res = await apiClient.post<CartMergeResponse>("/cart/merge", {
+              items: localShoeItems,
+            });
+
+            if (res && Array.isArray(res.items)) {
+              const mergedShoes = res.items as unknown as CartItem[];
+              set({ items: [...mergedShoes, ...localAccessories] });
+              return {
+                warnings: Array.isArray(res.warnings) ? res.warnings : [],
+                mergedCount: typeof res.mergedCount === "number" ? res.mergedCount : 0,
+              };
+            }
+            return { warnings: [], mergedCount: 0 };
+          } catch {
+            // Preserve local cart progress if merge request cannot reach server
+            return { warnings: [], mergedCount: 0 };
+          } finally {
+            set({ isSyncing: false });
+            inFlightCartMergePromise = null;
+          }
+        })();
+
+        return inFlightCartMergePromise;
       },
 
       addItem: (product, colorwayId, size, quantity = 1, maxStock) => {

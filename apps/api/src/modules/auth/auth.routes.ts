@@ -15,6 +15,11 @@ const authRouter: Router = Router();
 
 authRouter.post("/register", authController.register);
 authRouter.post("/login", authController.login);
+authRouter.get("/google/config", authController.getGooglePublicConfig);
+authRouter.post("/google/one-tap", authController.googleOneTapAuth);
+authRouter.post("/google", authController.googleOneTapAuth);
+authRouter.get("/google", authController.googleAuthStart);
+authRouter.get("/google/callback", authController.googleAuthCallback);
 authRouter.post("/refresh-token", authController.refreshToken);
 authRouter.post("/logout", optionalAuth, authController.logout);
 authRouter.post("/forgot-password", authController.forgotPassword);

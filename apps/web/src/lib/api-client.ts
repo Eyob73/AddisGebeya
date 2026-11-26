@@ -145,6 +145,8 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const isAuthEndpoint =
     normalizedEndpoint.includes("/auth/login") ||
     normalizedEndpoint.includes("/auth/register") ||
+    normalizedEndpoint.includes("/auth/google/one-tap") ||
+    normalizedEndpoint === "/auth/google" ||
     normalizedEndpoint.includes("/auth/refresh-token") ||
     normalizedEndpoint.includes("/auth/logout");
 

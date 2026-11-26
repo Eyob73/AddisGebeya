@@ -5,14 +5,15 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Eye, EyeOff, Loader2, Lock, Mail, ShieldCheck, Store, User } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DEMO_CUSTOMER, DEMO_OWNER, useAuthStore } from "@/stores/auth.store";
+import { useAuthStore } from "@/stores/auth.store";
 import { useUiStore } from "@/stores/ui.store";
 
 const loginSchema = z.object({
@@ -34,13 +35,12 @@ function LoginForm() {
   const {
     register,
     handleSubmit,
-    setValue,
     formState: { errors },
   } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: DEMO_CUSTOMER.email,
-      password: "CustomerPass123!",
+      email: "",
+      password: "",
     },
   });
 
@@ -124,6 +124,7 @@ function LoginForm() {
                 id="password"
                 type={showPassword ? "text" : "password"}
                 className="pr-10 pl-10"
+                placeholder="Enter your password"
                 {...register("password")}
               />
               <button
@@ -152,35 +153,16 @@ function LoginForm() {
           </Button>
         </form>
 
-        {/* Quick Demo Role Switchers (Configured with real seed accounts) */}
-        <div className="mt-6 space-y-2.5 border-t border-border pt-5">
-          <p className="flex items-center justify-center gap-1.5 font-label text-[11px] font-bold text-muted-foreground uppercase">
-            <ShieldCheck className="size-3.5 text-primary" /> Seed Account Quick Fill
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setValue("email", DEMO_CUSTOMER.email);
-                setValue("password", "CustomerPass123!");
-              }}
-            >
-              <User className="size-3.5" /> Customer Demo
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setValue("email", DEMO_OWNER.email);
-                setValue("password", "AdminPass123!");
-              }}
-            >
-              <Store className="size-3.5" /> Store Owner
-            </Button>
+        <div className="mt-5 space-y-4">
+          <div className="relative flex items-center py-1">
+            <div className="grow border-t border-border" />
+            <span className="mx-3 shrink-0 font-label text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
+              Or continue with
+            </span>
+            <div className="grow border-t border-border" />
           </div>
+
+          <GoogleAuthButton intent="login" from={from} disabled={isSubmitting} />
         </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">

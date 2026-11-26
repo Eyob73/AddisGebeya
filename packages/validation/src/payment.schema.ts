@@ -104,3 +104,14 @@ export const updatePaymentProviderConfigSchema = z.object({
 
 export type UpdatePaymentProviderConfigInput = z.infer<typeof updatePaymentProviderConfigSchema>;
 
+export const adminRefundPaymentSchema = z.object({
+  stage: z.enum(["initiated", "completed"]).default("completed"),
+  reason: z
+    .string()
+    .trim()
+    .min(5, "Refund reason must be at least 5 characters")
+    .max(500, "Refund reason cannot exceed 500 characters"),
+});
+
+export type AdminRefundPaymentInput = z.infer<typeof adminRefundPaymentSchema>;
+

@@ -25,9 +25,11 @@ import { useAuthStore } from "@/stores/auth.store";
 import { useUiStore } from "@/stores/ui.store";
 
 export default function SecurityPage() {
-  const { changePassword } = useAuthStore();
+  const { user, changePassword } = useAuthStore();
   const addToast = useUiStore((s) => s.addToast);
   const isMounted = useIsMounted();
+  const hasPassword = user?.hasPassword !== false;
+  const authProviders = user?.authProviders ?? (hasPassword ? ["password"] : []);
 
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
@@ -93,7 +95,7 @@ export default function SecurityPage() {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!currentPassword) {
+    if (hasPassword && !currentPassword) {
       addToast({
         title: "Current Password Required",
         description: "Please enter your existing password to verify ownership.",
@@ -120,7 +122,7 @@ export default function SecurityPage() {
       return;
     }
 
-    if (newPassword === currentPassword) {
+    if (hasPassword && newPassword === currentPassword) {
       addToast({
         title: "Password Reused",
         description: "Your new password must be different from your current password.",
@@ -131,10 +133,15 @@ export default function SecurityPage() {
 
     setIsSubmitting(true);
     try {
-      await changePassword({ currentPassword, newPassword });
+      await changePassword({
+        ...(hasPassword ? { currentPassword } : {}),
+        newPassword,
+      });
       addToast({
-        title: "Password Changed Successfully",
-        description: "Your password has been updated. Other active sessions have been securely rotated.",
+        title: hasPassword ? "Password Changed Successfully" : "Password Created Successfully",
+        description: hasPassword
+          ? "Your password has been updated. Other active sessions have been securely rotated."
+          : "You can now sign in with email and password or continue using Google.",
         variant: "success",
       });
       setCurrentPassword("");
@@ -183,52 +190,65 @@ export default function SecurityPage() {
           </div>
         </div>
 
-        {/* Change Password Form */}
+        {/* Change / Set Password Form */}
         <section className="rounded-2xl border border-border bg-surface p-6 shadow-card sm:p-8">
-          <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
             <div className="flex items-center gap-2.5">
               <KeyRound className="size-5 text-primary" />
               <div>
                 <h2 className="font-display text-lg font-bold text-foreground">
-                  Update Account Password
+                  {hasPassword ? "Update Account Password" : "Set an Account Password"}
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Choose a robust password with uppercase letters, numbers, and symbols.
+                  {hasPassword
+                    ? "Choose a robust password with uppercase letters, numbers, and symbols."
+                    : "Your account currently signs in with Google. Add a password as a secondary sign-in method."}
                 </p>
               </div>
             </div>
-            <Link
-              href="/forgot-password"
-              className="font-label text-xs font-bold text-primary hover:underline"
-            >
-              Forgot Password?
-            </Link>
+            <div className="flex items-center gap-2">
+              {authProviders.includes("google") ? (
+                <Badge variant="success" className="text-[10px]">
+                  Google Connected
+                </Badge>
+              ) : null}
+              {hasPassword ? (
+                <Link
+                  href="/forgot-password"
+                  className="font-label text-xs font-bold text-primary hover:underline"
+                >
+                  Forgot Password?
+                </Link>
+              ) : null}
+            </div>
           </div>
 
           <form onSubmit={handleChangePassword} className="space-y-6 max-w-xl">
             {/* Current Password */}
-            <div>
-              <label className="mb-1.5 block font-label text-xs font-bold text-muted-foreground">
-                Current Password
-              </label>
-              <div className="relative">
-                <Input
-                  type={showCurrent ? "text" : "password"}
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  placeholder="Enter current password"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowCurrent(!showCurrent)}
-                  className="absolute right-3 top-3 text-muted-foreground hover:text-foreground cursor-pointer"
-                  aria-label={showCurrent ? "Hide password" : "Show password"}
-                >
-                  {showCurrent ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </button>
+            {hasPassword ? (
+              <div>
+                <label className="mb-1.5 block font-label text-xs font-bold text-muted-foreground">
+                  Current Password
+                </label>
+                <div className="relative">
+                  <Input
+                    type={showCurrent ? "text" : "password"}
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Enter current password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrent(!showCurrent)}
+                    className="absolute right-3 top-3 text-muted-foreground hover:text-foreground cursor-pointer"
+                    aria-label={showCurrent ? "Hide password" : "Show password"}
+                  >
+                    {showCurrent ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : null}
 
             {/* New Password */}
             <div>
@@ -323,7 +343,13 @@ export default function SecurityPage() {
               </span>
               <Button type="submit" disabled={isSubmitting}>
                 <Lock className="size-4 mr-1.5" />
-                {isSubmitting ? "Changing Password..." : "Change Password"}
+                {isSubmitting
+                  ? hasPassword
+                    ? "Changing Password..."
+                    : "Setting Password..."
+                  : hasPassword
+                    ? "Change Password"
+                    : "Set Password"}
               </Button>
             </div>
           </form>

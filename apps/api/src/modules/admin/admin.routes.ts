@@ -12,6 +12,7 @@ adminRouter.get("/customers", adminController.listCustomers);
 adminRouter.get("/inventory", adminController.listInventory);
 adminRouter.get("/payments", adminController.listPayments);
 adminRouter.post("/payments/:paymentId/review", adminController.reviewPayment);
+adminRouter.post("/payments/:paymentId/refund", adminController.refundPayment);
 adminRouter.get("/payment-providers", adminController.listPaymentProviderConfigs);
 adminRouter.put("/payment-providers/:providerCode", adminController.updatePaymentProviderConfig);
 

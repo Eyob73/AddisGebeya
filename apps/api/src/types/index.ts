@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-namespace */
+/* eslint-disable @typescript-eslint/no-namespace, @typescript-eslint/no-empty-object-type */
 export interface RequestUser {
   id: string;
   email: string;
@@ -11,8 +11,6 @@ export interface RequestContext {
 
 declare global {
   namespace Express {
-    interface Request {
-      user?: RequestUser;
-    }
+    interface User extends RequestUser {}
   }
 }

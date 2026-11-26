@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  Bell,
   CheckCircle2,
   ExternalLink,
   FolderTree,
@@ -22,10 +23,12 @@ import {
   Wallet,
   X,
 } from "lucide-react";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { useAuthStore } from "@/stores/auth.store";
 import { useCatalogStore } from "@/stores/catalog.store";
+import { useNotificationStore } from "@/stores/notification.store";
 import { useUiStore } from "@/stores/ui.store";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +43,7 @@ export function AdminShell({ children }: AdminShellProps) {
   const products = useCatalogStore((s) => s.products);
   const orders = useCatalogStore((s) => s.orders);
   const settings = useCatalogStore((s) => s.settings);
+  const unreadNotificationCount = useNotificationStore((s) => s.unreadCount);
 
   const pendingDispatchCount = orders.filter((o) => {
     const s = o.status.toLowerCase();
@@ -48,6 +52,13 @@ export function AdminShell({ children }: AdminShellProps) {
 
   const navItems = [
     { href: "/admin", label: "Overview", icon: LayoutDashboard, exact: true },
+    {
+      href: "/admin/notifications",
+      label: "Notifications",
+      icon: Bell,
+      badge: unreadNotificationCount > 0 ? String(unreadNotificationCount) : undefined,
+      badgeCta: unreadNotificationCount > 0,
+    },
     {
       href: "/admin/products",
       label: "Product Management",
@@ -142,6 +153,8 @@ export function AdminShell({ children }: AdminShellProps) {
           </div>
 
           <div className="flex items-center gap-2.5">
+            <NotificationBell viewAllHref="/admin/notifications" />
+
             <button
               type="button"
               onClick={toggleTheme}

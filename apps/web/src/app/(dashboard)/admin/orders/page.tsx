@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { CheckCircle2, Eye, Search, ShieldCheck, Truck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,11 +41,15 @@ const ORDER_STATUSES: Array<{ value: OrderStatus; label: string }> = [
   { value: "cancelled", label: "Cancelled (Legacy)" },
 ];
 
-export default function AdminOrdersPage() {
+function AdminOrdersInner() {
+  const searchParams = useSearchParams();
+  const paramSearch = searchParams.get("search") ?? "";
   const { data: orders = [], isLoading, refetch } = useOrdersQuery();
   const addToast = useUiStore((s) => s.addToast);
 
-  const [query, setQuery] = React.useState("");
+  const [queryDraft, setQueryDraft] = React.useState<{ base: string; value: string } | null>(null);
+  const query = queryDraft && queryDraft.base === paramSearch ? queryDraft.value : paramSearch;
+  const setQuery = (next: string) => setQueryDraft({ base: paramSearch, value: next });
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [selectedOrder, setSelectedOrder] = React.useState<OrderRecord | null>(null);
   const [refInput, setRefInput] = React.useState("");
@@ -449,6 +455,14 @@ export default function AdminOrdersPage() {
         ) : null}
       </ModalDialog>
     </div>
+  );
+}
+
+export default function AdminOrdersPage() {
+  return (
+    <Suspense fallback={<AdminTablePageSkeleton title="Orders" hasCreateButton={false} />}>
+      <AdminOrdersInner />
+    </Suspense>
   );
 }
 

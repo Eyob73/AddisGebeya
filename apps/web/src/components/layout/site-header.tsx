@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Bell,
   ChevronDown,
   Heart,
   LayoutDashboard,
@@ -19,6 +20,7 @@ import {
   User,
   X,
 } from "lucide-react";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { SearchBar } from "@/components/shared/search-bar";
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -208,6 +210,9 @@ export function SiteHeader() {
               {theme === "light" ? <Moon className="size-4" /> : <Sun className="size-4" />}
             </button>
 
+            {/* Real-time Notification Bell */}
+            <NotificationBell />
+
             {/* Wishlist */}
             <Link
               href="/wishlist"
@@ -322,6 +327,13 @@ export function SiteHeader() {
                         <Truck className="size-4" /> Track Order
                       </Link>
                       <Link
+                        href="/account/notifications"
+                        onClick={() => setAccountOpen(false)}
+                        className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary transition-colors"
+                      >
+                        <Bell className="size-4" /> Notifications
+                      </Link>
+                      <Link
                         href="/wishlist"
                         onClick={() => setAccountOpen(false)}
                         className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold text-foreground hover:bg-primary-light hover:text-primary transition-colors"
@@ -419,6 +431,13 @@ export function SiteHeader() {
                 className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-foreground"
               >
                 <Truck className="size-4 text-primary" /> Track Order
+              </Link>
+              <Link
+                href="/account/notifications"
+                onClick={closeMobileMenu}
+                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-foreground"
+              >
+                <Bell className="size-4 text-primary" /> Notifications
               </Link>
               <Link
                 href="/wishlist"

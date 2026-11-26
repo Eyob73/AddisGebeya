@@ -2,19 +2,22 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Eye, Package, ShieldCheck, Truck } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Package, ShieldCheck, Truck, XCircle } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AccountShell } from "@/components/layout/account-shell";
 import { OrderHistoryPageSkeleton } from "@/components/shared/page-skeletons";
 import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ModalDialog } from "@/components/ui/dialog";
+import { ConfirmationDialog, ModalDialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   getPaymentBadgeVariant,
   isPaymentSettledStatus,
 } from "@/features/payment/payment-verification-panel";
 import { useOrdersQuery } from "@/hooks/use-store-queries";
+import { storeService } from "@/services/store.service";
+import { useUiStore } from "@/stores/ui.store";
 import type { OrderRecord } from "@/types/store.types";
 import { formatDateShort, formatETB } from "@/utils/format";
 import { cn } from "@/lib/utils";
@@ -28,10 +31,45 @@ const STATUS_TABS = [
 
 export default function OrderHistoryPage() {
   const isMounted = useIsMounted();
-  const { data: orders = [], isLoading } = useOrdersQuery();
+  const queryClient = useQueryClient();
+  const addToast = useUiStore((s) => s.addToast);
+  const { data: orders = [], isLoading, refetch } = useOrdersQuery();
   const [filter, setFilter] = React.useState("all");
   const [currentPage, setCurrentPage] = React.useState(1);
   const [selectedOrder, setSelectedOrder] = React.useState<OrderRecord | null>(null);
+  const [cancelTargetOrder, setCancelTargetOrder] = React.useState<OrderRecord | null>(null);
+  const [isCancelling, setIsCancelling] = React.useState(false);
+
+  const canCustomerCancelOrder = (order: OrderRecord) => {
+    const s = order.status.toLowerCase();
+    return s === "pendingpayment" || s === "pending" || s === "confirmed";
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!cancelTargetOrder || isCancelling) return;
+    setIsCancelling(true);
+    try {
+      await storeService.cancelOrder(cancelTargetOrder.id, "Cancelled by customer from Order History");
+      await Promise.all([
+        refetch(),
+        queryClient.invalidateQueries({ queryKey: ["orders"] }),
+      ]);
+      addToast({
+        title: `Order #${cancelTargetOrder.id} Cancelled`,
+        description: "Your order has been cancelled and reserved stock released.",
+        variant: "warning",
+      });
+    } catch (err) {
+      addToast({
+        title: "Cancellation Failed",
+        description: err instanceof Error ? err.message : "Could not cancel order.",
+        variant: "error",
+      });
+    } finally {
+      setIsCancelling(false);
+      setCancelTargetOrder(null);
+    }
+  };
 
   const PAGE_SIZE = 5;
 
@@ -234,6 +272,18 @@ export default function OrderHistoryPage() {
                     >
                       <Eye className="size-3.5" /> Receipt
                     </Button>
+                    {canCustomerCancelOrder(order) ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isCancelling}
+                        onClick={() => setCancelTargetOrder(order)}
+                        className="text-destructive hover:bg-red-50 hover:text-destructive dark:hover:bg-red-950/40"
+                      >
+                        <XCircle className="size-3.5" /> Cancel
+                      </Button>
+                    ) : null}
                     <Button asChild size="sm">
                       <Link href={`/account/tracking?order=${order.id}`}>
                         <Truck className="size-3.5" /> Track Order
@@ -333,6 +383,17 @@ export default function OrderHistoryPage() {
           </div>
         ) : null}
       </ModalDialog>
+
+      <ConfirmationDialog
+        open={Boolean(cancelTargetOrder)}
+        onClose={() => setCancelTargetOrder(null)}
+        onConfirm={() => void handleConfirmCancel()}
+        title={cancelTargetOrder ? `Cancel Order #${cancelTargetOrder.id}?` : "Cancel Order"}
+        description="Cancelling this order releases your reserved shoe sizes back to inventory. This action cannot be undone."
+        confirmLabel={isCancelling ? "Cancelling..." : "Confirm Cancellation"}
+        cancelLabel="Keep Order"
+        destructive
+      />
     </AccountShell>
   );
 }

@@ -2,6 +2,7 @@ import { HTTP_STATUS } from "@addisgebeya/shared";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database.js";
 import { AppError } from "../../utils/app-error.js";
+import { notificationService } from "../notifications/notification.service.js";
 import { orderService } from "../orders/order.service.js";
 
 export type PaymentMethodType = "telebirr" | "cbeBirr" | "chapa" | "cod" | "bank_transfer";
@@ -190,10 +191,55 @@ export class PaymentService {
     if (isSuccess) {
       await orderService.verifyPayment(payment.order.orderNumber, reference, "verified");
     } else {
-      await prisma.order.update({
-        where: { id: payment.orderId },
-        data: { paymentStatus: "failed" },
+      await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: payment.orderId },
+          data: { paymentStatus: "failed" },
+        });
+
+        const customerId = payment.userId ?? payment.order.userId;
+        if (customerId) {
+          await notificationService.createNotification(
+            {
+              userId: customerId,
+              title: `Payment Rejected — Order #${payment.order.orderNumber}`,
+              message: `Your payment callback for order #${payment.order.orderNumber} (Ref: ${reference}) reported a failure. Please review and try again.`,
+              type: "payment_rejected",
+              relatedEntityId: payment.order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: payment.orderId,
+                orderNumber: payment.order.orderNumber,
+                paymentId: payment.id,
+                reference,
+              },
+              idempotencyKey: `payment-callback-failed:${payment.id}:${reference}`,
+            },
+            tx,
+          );
+        }
+
+        await notificationService.notifyAdmins(
+          {
+            title: `Payment Rejected — Order #${payment.order.orderNumber}`,
+            message: `Payment callback for ${payment.order.customerName}'s order #${payment.order.orderNumber} (Ref: ${reference}) failed.`,
+            type: "admin_payment_rejected",
+            relatedEntityId: payment.order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: payment.orderId,
+              orderNumber: payment.order.orderNumber,
+              paymentId: payment.id,
+              customerName: payment.order.customerName,
+              reference,
+            },
+            idempotencyKey: `admin-payment-callback-failed:${payment.id}:${reference}`,
+          },
+          tx,
+        );
       });
+
+      void notificationService.flushOutbox();
     }
 
     return { success: isSuccess, reference, orderNumber: payment.order.orderNumber };

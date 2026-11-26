@@ -3,15 +3,17 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Heart, Lock, LogOut, MapPin, Package, Settings, ShoppingBag, Truck, User, UserCheck } from "lucide-react";
+import { Bell, Heart, Lock, LogOut, MapPin, Package, Settings, ShoppingBag, Truck, User, UserCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { useAuthStore } from "@/stores/auth.store";
+import { useNotificationStore } from "@/stores/notification.store";
 import { useUiStore } from "@/stores/ui.store";
 import { cn } from "@/lib/utils";
 
 const ACCOUNT_LINKS = [
   { href: "/account", label: "Overview", icon: User, exact: true },
+  { href: "/account/notifications", label: "Notifications", icon: Bell },
   { href: "/account/profile", label: "Personal Information", icon: UserCheck },
   { href: "/account/security", label: "Change Password", icon: Lock },
   { href: "/account/addresses", label: "My Addresses", icon: MapPin },
@@ -32,6 +34,7 @@ export function AccountShell({ title, subtitle, children }: AccountShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuthStore();
+  const unreadNotificationCount = useNotificationStore((s) => s.unreadCount);
   const addToast = useUiStore((s) => s.addToast);
 
   return (
@@ -79,14 +82,26 @@ export function AccountShell({ title, subtitle, children }: AccountShellProps) {
                   key={href}
                   href={href}
                   className={cn(
-                    "flex items-center gap-3 rounded-xl px-3.5 py-2.5 font-label text-xs font-bold transition-colors",
+                    "flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 font-label text-xs font-bold transition-colors",
                     active
                       ? "bg-primary text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-primary-light hover:text-primary",
                   )}
                 >
-                  <Icon className="size-4" />
-                  <span>{label}</span>
+                  <span className="flex items-center gap-3">
+                    <Icon className="size-4" />
+                    <span>{label}</span>
+                  </span>
+                  {href === "/account/notifications" && unreadNotificationCount > 0 ? (
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                        active ? "bg-white/20 text-white" : "bg-cta text-white",
+                      )}
+                    >
+                      {unreadNotificationCount}
+                    </span>
+                  ) : null}
                 </Link>
               );
             })}

@@ -4,11 +4,32 @@ import { prisma } from "../../config/database.js";
 import { AppError } from "../../utils/app-error.js";
 import { sendSuccess } from "../../utils/api-response.js";
 import { asyncHandler } from "../../utils/async-handler.js";
+import { getVerifiedGuestSessionId } from "../../utils/guest-session.js";
 import { verifyReceiptAccessToken } from "../../utils/jwt.js";
 import { paymentService } from "./payment.service.js";
-import { paymentVerificationService } from "./payment-verification.service.js";
+import {
+  paymentVerificationService,
+  type PaymentActor,
+} from "./payment-verification.service.js";
 
 const strParam = (p: unknown): string => (Array.isArray(p) ? String(p[0] ?? "") : String(p ?? ""));
+
+function resolvePaymentActor(req: Request, unauthorizedMessage: string): PaymentActor {
+  if (req.user) {
+    return { userId: req.user.id, role: req.user.role };
+  }
+
+  const guestSessionId = getVerifiedGuestSessionId(req);
+  if (guestSessionId) {
+    return { userId: null, guestSessionId, role: "CUSTOMER" };
+  }
+
+  throw new AppError({
+    message: unauthorizedMessage,
+    statusCode: HTTP_STATUS.UNAUTHORIZED,
+    code: "UNAUTHORIZED",
+  });
+}
 
 export const paymentController = {
   getProviders: asyncHandler(async (_req: Request, res: Response) => {
@@ -17,46 +38,23 @@ export const paymentController = {
   }),
 
   verifyPayment: asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
-      throw new AppError({
-        message: "Authentication required to verify payments",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-        code: "UNAUTHORIZED",
-      });
-    }
-
-    const result = await paymentVerificationService.verifyPayment(req.body, {
-      userId: req.user.id,
-      role: req.user.role,
-    });
+    const actor = resolvePaymentActor(req, "Authentication required to verify payments");
+    const result = await paymentVerificationService.verifyPayment(req.body, actor);
     sendSuccess(res, result, result.message);
   }),
 
   getPaymentStatus: asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
-      throw new AppError({
-        message: "Authentication required to check payment status",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-        code: "UNAUTHORIZED",
-      });
-    }
-
+    const actor = resolvePaymentActor(req, "Authentication required to check payment status");
     const orderId = strParam(req.params.orderId);
-    const status = await paymentVerificationService.getPaymentStatus(orderId, {
-      userId: req.user.id,
-      role: req.user.role,
-    });
+    const status = await paymentVerificationService.getPaymentStatus(orderId, actor);
     sendSuccess(res, status, "Payment status retrieved successfully");
   }),
 
   extractReceiptOcr: asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
-      throw new AppError({
-        message: "Authentication required to extract payment receipt details",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-        code: "UNAUTHORIZED",
-      });
-    }
+    const actor = resolvePaymentActor(
+      req,
+      "Authentication required to extract payment receipt details",
+    );
 
     const file = req.file
       ? {
@@ -67,21 +65,12 @@ export const paymentController = {
         }
       : undefined;
 
-    const result = await paymentVerificationService.extractReceiptOcr(req.body, file, {
-      userId: req.user.id,
-      role: req.user.role,
-    });
+    const result = await paymentVerificationService.extractReceiptOcr(req.body, file, actor);
     sendSuccess(res, result, result.message);
   }),
 
   submitReceipt: asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
-      throw new AppError({
-        message: "Authentication required to submit payment receipts",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-        code: "UNAUTHORIZED",
-      });
-    }
+    const actor = resolvePaymentActor(req, "Authentication required to submit payment receipts");
 
     const file = req.file
       ? {
@@ -92,104 +81,90 @@ export const paymentController = {
         }
       : undefined;
 
-    const result = await paymentVerificationService.submitReceipt(req.body, file, {
-      userId: req.user.id,
-      role: req.user.role,
-    });
+    const result = await paymentVerificationService.submitReceipt(req.body, file, actor);
     sendSuccess(res, result, result.message, HTTP_STATUS.CREATED);
   }),
 
   verifyReceiptById: asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
-      throw new AppError({
-        message: "Authentication required to verify payment receipts",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-        code: "UNAUTHORIZED",
-      });
-    }
-
+    const actor = resolvePaymentActor(req, "Authentication required to verify payment receipts");
     const receiptId = strParam(req.params.receiptId);
-    const result = await paymentVerificationService.verifyReceiptById(receiptId, req.body, {
-      userId: req.user.id,
-      role: req.user.role,
-    });
+    const result = await paymentVerificationService.verifyReceiptById(
+      receiptId,
+      req.body,
+      actor,
+    );
     sendSuccess(res, result, result.message);
   }),
 
   getOrderReceipts: asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
-      throw new AppError({
-        message: "Authentication required to view payment receipts",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-        code: "UNAUTHORIZED",
-      });
-    }
-
+    const actor = resolvePaymentActor(req, "Authentication required to view payment receipts");
     const orderId = strParam(req.params.orderId);
-    const receipts = await paymentVerificationService.getOrderReceipts(orderId, {
-      userId: req.user.id,
-      role: req.user.role,
-    });
+    const receipts = await paymentVerificationService.getOrderReceipts(orderId, actor);
     sendSuccess(res, { receipts }, "Order payment receipts retrieved successfully");
   }),
 
   createReceiptAccessUrl: asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
-      throw new AppError({
-        message: "Authentication required to access payment receipts",
-        statusCode: HTTP_STATUS.UNAUTHORIZED,
-        code: "UNAUTHORIZED",
-      });
-    }
-
+    const actor = resolvePaymentActor(req, "Authentication required to access payment receipts");
     const receiptId = strParam(req.params.receiptId);
-    const access = await paymentVerificationService.createAuthorizedReceiptAccess(receiptId, {
-      userId: req.user.id,
-      role: req.user.role,
-    });
+    const access = await paymentVerificationService.createAuthorizedReceiptAccess(receiptId, actor);
     sendSuccess(res, access, "Time-limited receipt access link created");
   }),
 
   streamReceiptFile: asyncHandler(async (req: Request, res: Response) => {
     const receiptId = strParam(req.params.receiptId);
-    let actor = req.user ? { userId: req.user.id, role: req.user.role } : null;
+    let actor: PaymentActor | null = req.user
+      ? { userId: req.user.id, role: req.user.role }
+      : null;
 
     if (!actor) {
       const accessToken =
         typeof req.query.access === "string" ? req.query.access.trim() : "";
-      if (!accessToken) {
-        throw new AppError({
-          message: "Authentication required to view receipt files",
-          statusCode: HTTP_STATUS.UNAUTHORIZED,
-          code: "UNAUTHORIZED",
-        });
-      }
 
-      const decoded = verifyReceiptAccessToken(accessToken);
-      if (decoded.receiptId !== receiptId) {
-        throw new AppError({
-          message: "Access token does not match the requested receipt.",
-          statusCode: HTTP_STATUS.FORBIDDEN,
-          code: "FORBIDDEN",
-        });
-      }
+      if (accessToken) {
+        const decoded = verifyReceiptAccessToken(accessToken);
+        if (decoded.receiptId !== receiptId) {
+          throw new AppError({
+            message: "Access token does not match the requested receipt.",
+            statusCode: HTTP_STATUS.FORBIDDEN,
+            code: "FORBIDDEN",
+          });
+        }
 
-      const tokenUser = await prisma.user.findUnique({
-        where: { id: decoded.sub },
-        select: { id: true, role: true, isActive: true },
-      });
-      if (!tokenUser || !tokenUser.isActive) {
-        throw new AppError({
-          message: "User account not found or deactivated",
-          statusCode: HTTP_STATUS.UNAUTHORIZED,
-          code: "ACCOUNT_DEACTIVATED",
-        });
-      }
+        if (decoded.sub.startsWith("guest:")) {
+          actor = {
+            userId: null,
+            guestSessionId: decoded.sub.slice(6),
+            role: "CUSTOMER",
+          };
+        } else {
+          const tokenUser = await prisma.user.findUnique({
+            where: { id: decoded.sub },
+            select: { id: true, role: true, isActive: true },
+          });
+          if (!tokenUser || !tokenUser.isActive) {
+            throw new AppError({
+              message: "User account not found or deactivated",
+              statusCode: HTTP_STATUS.UNAUTHORIZED,
+              code: "ACCOUNT_DEACTIVATED",
+            });
+          }
 
-      actor = {
-        userId: tokenUser.id,
-        role: tokenUser.role as "CUSTOMER" | "ADMIN",
-      };
+          actor = {
+            userId: tokenUser.id,
+            role: tokenUser.role as "CUSTOMER" | "ADMIN",
+          };
+        }
+      } else {
+        const guestSessionId = getVerifiedGuestSessionId(req);
+        if (!guestSessionId) {
+          throw new AppError({
+            message: "Authentication required to view receipt files",
+            statusCode: HTTP_STATUS.UNAUTHORIZED,
+            code: "UNAUTHORIZED",
+          });
+        }
+        actor = { userId: null, guestSessionId, role: "CUSTOMER" };
+      }
     }
 
     const file = await paymentVerificationService.getAuthorizedReceiptFile(receiptId, actor);

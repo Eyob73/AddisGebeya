@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { AlertTriangle, Download, Loader2, Plus, RotateCcw, Save, Search } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -57,12 +59,16 @@ function getMobileSizesForRow(
   return Array.from(set).sort((a, b) => a - b);
 }
 
-export default function AdminInventoryPage() {
+function AdminInventoryInner() {
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { data: products = [], isLoading, refetch } = useProductsQuery({ status: "all" });
   const addToast = useUiStore((s) => s.addToast);
 
-  const [query, setQuery] = React.useState("");
+  const paramSearch = searchParams.get("search") ?? "";
+  const [queryDraft, setQueryDraft] = React.useState<{ base: string; value: string } | null>(null);
+  const query = queryDraft && queryDraft.base === paramSearch ? queryDraft.value : paramSearch;
+  const setQuery = (next: string) => setQueryDraft({ base: paramSearch, value: next });
   const [onlyLowStock, setOnlyLowStock] = React.useState(false);
   const [draftStocks, setDraftStocks] = React.useState<Record<string, DraftColorwayChanges>>({});
   const [isSaving, setIsSaving] = React.useState(false);
@@ -668,5 +674,13 @@ export default function AdminInventoryPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function AdminInventoryPage() {
+  return (
+    <Suspense fallback={<AdminInventorySkeleton />}>
+      <AdminInventoryInner />
+    </Suspense>
   );
 }

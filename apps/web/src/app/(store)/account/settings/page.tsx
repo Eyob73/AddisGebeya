@@ -75,10 +75,13 @@ export default function AccountSettingsPage() {
 
   const handleDeactivate = async (e: React.FormEvent) => {
     e.preventDefault();
+    const hasPassword = user?.hasPassword !== false;
     if (!passwordConfirm) {
       addToast({
-        title: "Password Required",
-        description: "Please enter your password to confirm account deactivation.",
+        title: hasPassword ? "Password Required" : "Confirmation Required",
+        description: hasPassword
+          ? "Please enter your password to confirm account deactivation."
+          : 'Please type "DEACTIVATE" to confirm account deactivation.',
         variant: "warning",
       });
       return;
@@ -314,7 +317,11 @@ export default function AccountSettingsPage() {
           open={isDeactivateOpen}
           onClose={() => setIsDeactivateOpen(false)}
           title="Confirm Account Deactivation"
-          description="To confirm account deactivation, please enter your current account password below."
+          description={
+            user?.hasPassword === false
+              ? 'To confirm account deactivation, type "DEACTIVATE" below.'
+              : "To confirm account deactivation, please enter your current account password below."
+          }
         >
           <form onSubmit={handleDeactivate} className="space-y-4 pt-2">
             <div className="rounded-xl border border-amber-200 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
@@ -324,13 +331,15 @@ export default function AccountSettingsPage() {
 
             <div>
               <label className="mb-1 block font-label text-xs font-bold text-muted-foreground">
-                Confirm Password *
+                {user?.hasPassword === false ? 'Type "DEACTIVATE" *' : "Confirm Password *"}
               </label>
               <Input
-                type="password"
+                type={user?.hasPassword === false ? "text" : "password"}
                 value={passwordConfirm}
                 onChange={(e) => setPasswordConfirm(e.target.value)}
-                placeholder="Enter your current password"
+                placeholder={
+                  user?.hasPassword === false ? "DEACTIVATE" : "Enter your current password"
+                }
                 required
               />
             </div>

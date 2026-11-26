@@ -1,7 +1,9 @@
 import { apiClient } from "@/lib/api-client";
+import { notificationService } from "@/services/notification.service";
 import { useCatalogStore } from "@/stores/catalog.store";
 import type {
   AdminPaymentRecordDto,
+  GoogleOAuthPublicConfig,
   PaymentProviderConfigDto,
   PaymentProviderInfo,
   PaymentReceiptDto,
@@ -279,6 +281,21 @@ export const storeService = {
     }
   },
 
+  async getGooglePublicConfig(): Promise<GoogleOAuthPublicConfig> {
+    try {
+      return await apiClient.get<GoogleOAuthPublicConfig>("/auth/google/config");
+    } catch {
+      return { enabled: false, clientId: null };
+    }
+  },
+
+  async trackGuestOrder(orderNumber: string, email: string): Promise<OrderRecord> {
+    return apiClient.post<OrderRecord>("/orders/track", {
+      orderNumber: orderNumber.trim(),
+      email: email.trim().toLowerCase(),
+    });
+  },
+
   async listOrders(): Promise<OrderRecord[]> {
     return apiClient.get<OrderRecord[]>("/orders");
   },
@@ -296,6 +313,14 @@ export const storeService = {
     const order = await apiClient.post<OrderRecord>("/orders", payload);
     useCatalogStore.getState().syncFromBackend().catch(() => {});
     return order;
+  },
+
+  async cancelOrder(orderId: string, reason?: string): Promise<OrderRecord> {
+    const updated = await apiClient.patch<OrderRecord>(`/orders/${encodeURIComponent(orderId)}/cancel`, {
+      reason,
+    });
+    useCatalogStore.getState().updateOrderStatus(orderId, "Cancelled");
+    return updated;
   },
 
   async updateOrderStatus(
@@ -496,22 +521,28 @@ export const storeService = {
 
   async listNotifications(): Promise<NotificationRecord[]> {
     try {
-      return await apiClient.get<NotificationRecord[]>("/notifications");
+      const res = await notificationService.getNotifications({ page: 1, limit: 50 });
+      return res.items;
     } catch {
       return [];
     }
   },
 
   async markNotificationRead(id: string): Promise<NotificationRecord> {
-    return apiClient.patch<NotificationRecord>(`/notifications/${id}/read`, {});
+    const res = await notificationService.markAsRead(id);
+    return res.notification;
   },
 
   async markAllNotificationsRead(): Promise<void> {
-    await apiClient.patch("/notifications/read-all", {});
+    await notificationService.markAllAsRead();
   },
 
   async broadcastNotification(payload: { title: string; message: string }): Promise<void> {
-    await apiClient.post("/notifications/admin/broadcast", payload);
+    await notificationService.dispatchAdminNotification({
+      title: payload.title,
+      message: payload.message,
+      broadcast: true,
+    });
   },
 
   async initializePayment(payload: {

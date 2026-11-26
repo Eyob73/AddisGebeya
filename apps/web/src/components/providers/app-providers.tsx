@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { ToastViewport } from "@/components/ui/toast";
 import { useAuthStore } from "@/stores/auth.store";
 import { useCatalogStore } from "@/stores/catalog.store";
+import { NotificationSocketBridge } from "./notification-socket-bridge";
 import { QueryProvider } from "./query-provider";
 
 interface AppProvidersProps {
@@ -20,6 +21,7 @@ export function AppProviders({ children }: AppProvidersProps) {
 
   return (
     <QueryProvider>
+      <NotificationSocketBridge />
       {children}
       <ToastViewport />
     </QueryProvider>

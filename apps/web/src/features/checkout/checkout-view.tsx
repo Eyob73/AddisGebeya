@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Check,
@@ -24,8 +25,10 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { CheckoutAuthSection } from "@/components/checkout/checkout-auth-section";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { CheckoutPageSkeleton } from "@/components/shared/page-skeletons";
+import { useGoogleOneTap } from "@/hooks/use-google-one-tap";
 import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,10 +64,58 @@ const checkoutSchema = z.object({
 
 type CheckoutFormValues = z.infer<typeof checkoutSchema>;
 
+const CHECKOUT_DRAFT_KEY = "addisgebeya_checkout_draft_v1";
+
+interface StoredCheckoutDraft {
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  city?: string;
+  subCity?: string;
+  landmark?: string;
+  riderNotes?: string;
+  paymentMethod?: PaymentMethod;
+  deliverySpeed?: "standard" | "vip";
+  guestMode?: boolean;
+}
+
+function readCheckoutDraft(): StoredCheckoutDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(CHECKOUT_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as StoredCheckoutDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCheckoutDraft(draft: StoredCheckoutDraft): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(CHECKOUT_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // Ignore quota or storage restriction errors
+  }
+}
+
+function clearCheckoutDraft(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(CHECKOUT_DRAFT_KEY);
+  } catch {
+    // Ignore storage cleanup errors
+  }
+}
+
 export function CheckoutView() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const orderQueryParam = searchParams.get("order") ?? "";
+  const modeQueryParam = searchParams.get("mode") ?? "";
+  const authQueryParam = searchParams.get("auth") ?? "";
 
   const {
     items,
@@ -77,11 +128,15 @@ export function CheckoutView() {
   const settings = useCatalogStore((s) => s.settings);
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isAuthInitialized = useAuthStore((s) => s.isInitialized);
+  const loginWithGoogleOneTap = useAuthStore((s) => s.loginWithGoogleOneTap);
   const addToast = useUiStore((s) => s.addToast);
 
   const { data: liveProviders = [], isLoading: loadingProviders } = usePaymentProvidersQuery();
 
-  const [selectedPaymentMethod, setPaymentMethod] = React.useState<PaymentMethod>("cbe");
+  const [selectedPaymentMethod, setPaymentMethod] = React.useState<PaymentMethod>(
+    () => readCheckoutDraft()?.paymentMethod ?? "cbe",
+  );
   const paymentMethod: PaymentMethod =
     selectedPaymentMethod === "cod" ||
       liveProviders.length === 0 ||
@@ -91,7 +146,17 @@ export function CheckoutView() {
   const [countdownSeconds, setCountdownSeconds] = React.useState(892);
   const [confirmedOrder, setConfirmedOrder] = React.useState<OrderRecord | null>(null);
   const [copiedAccount, setCopiedAccount] = React.useState(false);
+  const [guestModeSelected, setGuestModeSelected] = React.useState(
+    () => modeQueryParam === "guest" || readCheckoutDraft()?.guestMode === true,
+  );
+  const [checkoutAuthError, setCheckoutAuthError] = React.useState<string | null>(null);
+  const [isOneTapVerifying, setIsOneTapVerifying] = React.useState(false);
+  const [quickSignedInBanner, setQuickSignedInBanner] = React.useState<string | null>(null);
   const isMounted = useIsMounted();
+  const deliverySectionRef = React.useRef<HTMLElement | null>(null);
+
+  const isGuestCheckout = !isAuthenticated && (guestModeSelected || modeQueryParam === "guest");
+  const isCheckoutFormUnlocked = isAuthenticated || isGuestCheckout;
 
   // Rehydrate order when returning or refreshing page with ?order=AG-XXXX
   React.useEffect(() => {
@@ -146,6 +211,8 @@ export function CheckoutView() {
   const {
     register,
     handleSubmit,
+    getValues,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<CheckoutFormValues>({
     resolver: zodResolver(checkoutSchema),
@@ -158,6 +225,166 @@ export function CheckoutView() {
       landmark: "",
       riderNotes: "",
     },
+  });
+
+  const persistDraftSnapshot = React.useCallback(
+    (overrideGuestMode?: boolean) => {
+      const values = getValues();
+      writeCheckoutDraft({
+        fullName: values.fullName,
+        phone: values.phone,
+        email: values.email,
+        city: values.city,
+        subCity: values.subCity,
+        landmark: values.landmark,
+        riderNotes: values.riderNotes,
+        paymentMethod,
+        deliverySpeed,
+        guestMode: overrideGuestMode ?? isGuestCheckout,
+      });
+    },
+    [getValues, paymentMethod, deliverySpeed, isGuestCheckout],
+  );
+
+  // Restore draft values preserved before interrupted/redirected auth
+  React.useEffect(() => {
+    if (!isMounted || orderQueryParam) return;
+    const draft = readCheckoutDraft();
+    if (!draft) return;
+
+    if (draft.fullName && !getValues("fullName")) {
+      setValue("fullName", draft.fullName);
+    }
+    if (draft.phone && getValues("phone") === "+251 911 234 567") {
+      setValue("phone", draft.phone);
+    }
+    if (draft.email && !getValues("email")) {
+      setValue("email", draft.email);
+    }
+    if (draft.city) {
+      setValue("city", draft.city);
+    }
+    if (draft.subCity) {
+      setValue("subCity", draft.subCity);
+    }
+    if (draft.landmark && !getValues("landmark")) {
+      setValue("landmark", draft.landmark);
+    }
+    if (draft.riderNotes && !getValues("riderNotes")) {
+      setValue("riderNotes", draft.riderNotes);
+    }
+    if (draft.deliverySpeed === "standard" || draft.deliverySpeed === "vip") {
+      setDeliverySpeed(draft.deliverySpeed);
+    }
+  }, [isMounted, orderQueryParam, getValues, setValue, setDeliverySpeed]);
+
+  // Sync non-form delivery/payment choices into sessionStorage draft
+  React.useEffect(() => {
+    if (orderQueryParam) return;
+    persistDraftSnapshot();
+  }, [orderQueryParam, persistDraftSnapshot]);
+
+  // Auto-fill blank contact details once user authenticates via Google or Email
+  React.useEffect(() => {
+    if (!user) return;
+    if (!getValues("fullName") && user.name) {
+      setValue("fullName", user.name);
+    }
+    if (!getValues("email") && user.email) {
+      setValue("email", user.email);
+    }
+    if (
+      user.phone &&
+      user.phone !== "Pending" &&
+      (!getValues("phone") || getValues("phone") === "+251 911 234 567")
+    ) {
+      setValue("phone", user.phone);
+    }
+    if (user.subCity && getValues("subCity") === ADDIS_SUBCITIES[0]) {
+      setValue("subCity", user.subCity);
+    }
+  }, [user, getValues, setValue]);
+
+  const scrollToDeliveryStep = React.useCallback(() => {
+    window.setTimeout(() => {
+      deliverySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const landmarkInput = document.getElementById("landmark");
+      if (landmarkInput) {
+        landmarkInput.focus({ preventScroll: true });
+      }
+    }, 120);
+  }, []);
+
+  // Automatically continue to Delivery Details after Google OAuth full-page redirect back to /checkout
+  React.useEffect(() => {
+    if (authQueryParam === "google_success" && isAuthenticated && !confirmedOrder) {
+      scrollToDeliveryStep();
+    }
+  }, [authQueryParam, isAuthenticated, confirmedOrder, scrollToDeliveryStep]);
+
+  const handleAuthenticatedContinuation = React.useCallback(
+    async (bannerText: string, toastTitle: string, toastDescription: string) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["orders"] }),
+        queryClient.invalidateQueries({ queryKey: ["addresses"] }),
+        queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+        queryClient.invalidateQueries({ queryKey: ["notifications", "unread-count"] }),
+      ]);
+      setQuickSignedInBanner(bannerText);
+      addToast({
+        title: toastTitle,
+        description: toastDescription,
+        variant: "success",
+      });
+      scrollToDeliveryStep();
+    },
+    [queryClient, addToast, scrollToDeliveryStep],
+  );
+
+  const handleOneTapCredential = React.useCallback(
+    async (credential: string) => {
+      persistDraftSnapshot(false);
+      setCheckoutAuthError(null);
+      setIsOneTapVerifying(true);
+      try {
+        const res = await loginWithGoogleOneTap(credential, "login");
+        await handleAuthenticatedContinuation(
+          res.isNewUser
+            ? `Welcome, ${res.user.name}! Your customer account is ready — complete delivery below.`
+            : `Signed in with Google as ${res.user.name}. Your bag and progress were preserved.`,
+          res.isNewUser ? "Account Created with Google" : "Signed In with Google",
+          res.isNewUser
+            ? "Your bag is merged and ready for delivery details."
+            : `Welcome back, ${res.user.name}! Continue with your delivery details.`,
+        );
+      } catch (err: unknown) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "Google quick sign-in failed. You can retry, sign in with email, or continue as guest.";
+        setCheckoutAuthError(msg);
+        addToast({
+          title: "Google Sign-In Failed",
+          description: msg,
+          variant: "error",
+        });
+      } finally {
+        setIsOneTapVerifying(false);
+      }
+    },
+    [persistDraftSnapshot, loginWithGoogleOneTap, handleAuthenticatedContinuation, addToast],
+  );
+
+  const { googleConfigured, oneTapStatus } = useGoogleOneTap({
+    enabled:
+      isMounted &&
+      isAuthInitialized &&
+      !isAuthenticated &&
+      !isGuestCheckout &&
+      !confirmedOrder &&
+      items.length > 0,
+    context: "use",
+    onCredential: handleOneTapCredential,
   });
 
   const selectedProviderInfo = liveProviders.find((p) => p.id === paymentMethod);
@@ -176,19 +403,21 @@ export function CheckoutView() {
   const onSubmit = async (values: CheckoutFormValues) => {
     if (items.length === 0) return;
 
-    if (!isAuthenticated) {
+    if (!isCheckoutFormUnlocked) {
+      document
+        .getElementById("checkout-auth-heading")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
       addToast({
-        title: "Sign In Required",
-        description: "Please sign in so we can link and verify your bank payment securely.",
+        title: "Choose Express Checkout Option",
+        description: "Sign in with Google, sign in with email, or select Continue as Guest.",
         variant: "warning",
       });
-      router.push("/login?redirect=/checkout");
       return;
     }
 
     try {
       const placedOrder = await storeService.createOrder({
-        customerId: user?.id,
+        customerId: isAuthenticated ? user?.id : undefined,
         customerName: values.fullName.trim(),
         customerPhone: values.phone.trim(),
         customerEmail: values.email.trim(),
@@ -216,6 +445,7 @@ export function CheckoutView() {
         })),
       });
 
+      clearCheckoutDraft();
       clearCart();
       setConfirmedOrder(placedOrder);
       router.replace(`/checkout?order=${encodeURIComponent(placedOrder.id)}`);
@@ -228,7 +458,7 @@ export function CheckoutView() {
         description:
           paymentMethod === "cod"
             ? "Cash on Delivery request registered. Awaiting confirmation."
-            : "Transfer to the displayed account and click Verify Payment.",
+            : "Transfer to the displayed account and verify your payment receipt below.",
         variant: "success",
       });
     } catch (err: unknown) {
@@ -379,14 +609,35 @@ export function CheckoutView() {
             ) : null}
 
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
-              <Button asChild variant="cta" size="lg">
-                <Link href={`/account/tracking?order=${confirmedOrder.id}`}>
-                  Track Order #{confirmedOrder.id}
-                </Link>
-              </Button>
-              <Button asChild variant="outline" size="lg">
-                <Link href="/account/orders">View Order History</Link>
-              </Button>
+              {isAuthenticated ? (
+                <>
+                  <Button asChild variant="cta" size="lg">
+                    <Link href={`/account/tracking?order=${confirmedOrder.id}`}>
+                      Track Order #{confirmedOrder.id}
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" size="lg">
+                    <Link href="/account/orders">View Order History</Link>
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button asChild variant="cta" size="lg">
+                    <Link
+                      href={`/track-order?order=${encodeURIComponent(confirmedOrder.id)}&email=${encodeURIComponent(confirmedOrder.customerEmail)}`}
+                    >
+                      Track Order #{confirmedOrder.id}
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" size="lg">
+                    <Link
+                      href={`/track-order?order=${encodeURIComponent(confirmedOrder.id)}&email=${encodeURIComponent(confirmedOrder.customerEmail)}`}
+                    >
+                      Save Tracking Reference ({confirmedOrder.customerEmail})
+                    </Link>
+                  </Button>
+                </>
+              )}
               <Button asChild variant="ghost" size="lg">
                 <Link href="/shop">Continue Shopping</Link>
               </Button>
@@ -426,27 +677,61 @@ export function CheckoutView() {
               </span>
             </div>
 
-            {!isAuthenticated ? (
-              <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-50 px-5 py-3.5 text-xs text-amber-950 dark:bg-amber-950/40 dark:text-amber-200">
-                <div className="flex items-center gap-2.5">
-                  <Lock className="size-4 shrink-0" />
-                  <span>
-                    Sign in to your AddisGebeya account to link your order and verify bank
-                    transfers securely.
-                  </span>
-                </div>
-                <Button asChild size="sm" variant="cta">
-                  <Link href="/login?redirect=/checkout">Sign In to Continue</Link>
-                </Button>
-              </div>
-            ) : null}
-
             <form
               onSubmit={handleSubmit(onSubmit)}
+              onChange={() => persistDraftSnapshot()}
               className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12 lg:gap-10"
             >
-              {/* LEFT COLUMN: 3 Checkout Steps (7 cols) */}
+              {/* LEFT COLUMN: Authentication & 3 Checkout Steps (7 cols) */}
               <div className="space-y-6 lg:col-span-7">
+                {!isAuthenticated ? (
+                  <div>
+                    <CheckoutAuthSection
+                      mode={isGuestCheckout ? "guest" : "choose"}
+                      oneTapStatus={oneTapStatus}
+                      googleConfigured={googleConfigured}
+                      isOneTapVerifying={isOneTapVerifying}
+                      authError={checkoutAuthError}
+                      onClearAuthError={() => setCheckoutAuthError(null)}
+                      onBeforeGoogleRedirect={() => persistDraftSnapshot(false)}
+                      onEmailSignInSuccess={() => {
+                        void handleAuthenticatedContinuation(
+                          "Signed in with your AddisGebeya account. Your bag and progress were merged.",
+                          "Signed In Successfully",
+                          "Proceed with your delivery information below.",
+                        );
+                      }}
+                      onSelectGuestMode={() => {
+                        setGuestModeSelected(true);
+                        persistDraftSnapshot(true);
+                        addToast({
+                          title: "Continuing as Guest",
+                          description: "Complete your delivery and payment details below — no account needed.",
+                          variant: "success",
+                        });
+                        scrollToDeliveryStep();
+                      }}
+                      onReopenAuthOptions={() => {
+                        setGuestModeSelected(false);
+                        persistDraftSnapshot(false);
+                      }}
+                    />
+                  </div>
+                ) : quickSignedInBanner || authQueryParam === "google_success" ? (
+                  <div
+                    role="status"
+                    className="flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs font-semibold text-emerald-800 dark:text-emerald-200"
+                  >
+                    <CheckCircle2 className="size-4 shrink-0" />
+                    <span>
+                      {quickSignedInBanner ||
+                        `Signed in with Google as ${user?.name ?? "Customer"}. Your shopping bag and checkout progress are ready below.`}
+                    </span>
+                  </div>
+                ) : null}
+
+                {isCheckoutFormUnlocked ? (
+                  <>
                 {/* STEP 1: Customer Contact */}
                 <section className="rounded-xl border border-border bg-surface p-6 shadow-card">
                   <div className="mb-5 flex items-center justify-between">
@@ -519,7 +804,11 @@ export function CheckoutView() {
                 </section>
 
                 {/* STEP 2: Delivery Address */}
-                <section className="rounded-xl border border-border bg-surface p-6 shadow-card">
+                <section
+                  id="checkout-delivery-step"
+                  ref={deliverySectionRef}
+                  className="scroll-mt-8 rounded-xl border border-border bg-surface p-6 shadow-card"
+                >
                   <div className="mb-5 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="flex size-7 items-center justify-center rounded-full bg-primary font-display text-xs font-bold text-primary-foreground">
@@ -862,6 +1151,15 @@ export function CheckoutView() {
                     </div>
                   ) : null}
                 </section>
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border bg-surface-low/40 p-5 text-center text-xs text-muted-foreground">
+                    Select <strong className="text-foreground">Continue with Google</strong>,{" "}
+                    <strong className="text-foreground">Sign in with Email</strong>, or{" "}
+                    <strong className="text-foreground">Continue as Guest</strong> above to enter
+                    your delivery address and Ethiopian payment option.
+                  </div>
+                )}
               </div>
 
               {/* RIGHT COLUMN: Order Review Sidebar (5 cols) */}
@@ -948,24 +1246,45 @@ export function CheckoutView() {
                   </div>
 
                   <div className="mt-6">
-                    <Button
-                      type="submit"
-                      variant="cta"
-                      size="lg"
-                      disabled={isSubmitting}
-                      className="h-13 w-full text-sm uppercase tracking-wider"
-                    >
-                      <ShoppingBag className="size-4" />
-                      <span>
-                        {paymentMethod === "cod"
-                          ? "Place Order (Cash on Delivery)"
-                          : "Place Order"}
-                      </span>
-                    </Button>
-                    <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                      Orders remain <strong className="text-foreground">PendingPayment</strong> until
-                      transaction verification succeeds.
-                    </p>
+                    {isCheckoutFormUnlocked ? (
+                      <>
+                        <Button
+                          type="submit"
+                          variant="cta"
+                          size="lg"
+                          disabled={isSubmitting}
+                          className="h-13 w-full text-sm uppercase tracking-wider"
+                        >
+                          <ShoppingBag className="size-4" />
+                          <span>
+                            {paymentMethod === "cod"
+                              ? "Place Order (Cash on Delivery)"
+                              : "Place Order"}
+                          </span>
+                        </Button>
+                        <p className="mt-2 text-center text-[11px] text-muted-foreground">
+                          Orders remain <strong className="text-foreground">PendingPayment</strong> until
+                          transaction verification succeeds.
+                        </p>
+                      </>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="lg"
+                        onClick={() =>
+                          document
+                            .getElementById("checkout-auth-heading")
+                            ?.scrollIntoView({
+                              behavior: "smooth",
+                              block: "center",
+                            })
+                        }
+                        className="h-12 w-full text-xs font-bold uppercase tracking-wider"
+                      >
+                        Choose Sign-In or Guest Option Above
+                      </Button>
+                    )}
                   </div>
                 </div>
 

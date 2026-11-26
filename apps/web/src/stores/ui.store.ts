@@ -19,6 +19,11 @@ interface UiState {
   isAdminSidebarOpen: boolean;
   setAdminSidebarOpen: (isOpen: boolean) => void;
 
+  isCartOpen: boolean;
+  setCartOpen: (isOpen: boolean) => void;
+  openCart: () => void;
+  closeCart: () => void;
+
   theme: "light" | "dark";
   toggleTheme: () => void;
   setTheme: (theme: "light" | "dark") => void;
@@ -39,6 +44,11 @@ export const useUiStore = create<UiState>((set) => ({
 
   isAdminSidebarOpen: false,
   setAdminSidebarOpen: (isOpen) => set({ isAdminSidebarOpen: isOpen }),
+
+  isCartOpen: false,
+  setCartOpen: (isOpen) => set({ isCartOpen: isOpen }),
+  openCart: () => set({ isCartOpen: true }),
+  closeCart: () => set({ isCartOpen: false }),
 
   theme: "light",
   toggleTheme: () =>

@@ -110,7 +110,7 @@ export function SiteFooter() {
             </h4>
             <ul className="space-y-2.5 text-sm text-muted-foreground">
               <li>
-                <Link href="/account/tracking" className="hover:text-primary transition-colors">
+                <Link href="/track-order" className="hover:text-primary transition-colors">
                   Order Tracking
                 </Link>
               </li>
@@ -196,7 +196,7 @@ export function SiteFooter() {
             <Link href="/contact" className="hover:text-primary">
               7-Day Size Exchange
             </Link>
-            <Link href="/account/tracking" className="hover:text-primary">
+            <Link href="/track-order" className="hover:text-primary">
               Dispatch Policy
             </Link>
           </div>

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { resolveUploadedAvatarUrl } from "@addisgebeya/shared";
+import type { GoogleOAuthIntent, GoogleOneTapAuthResponse } from "@addisgebeya/types";
 import {
   apiClient,
   clearStoredTokens,
@@ -8,6 +9,7 @@ import {
   setStoredTokens,
 } from "@/lib/api-client";
 import { useCartStore } from "@/stores/cart.store";
+import { useNotificationStore } from "@/stores/notification.store";
 import { useWishlistStore } from "@/stores/wishlist.store";
 import type { AuthUser } from "@/types/store.types";
 
@@ -47,6 +49,11 @@ interface AuthState {
     preferredSize?: number;
     subCity?: string;
   }) => Promise<AuthUser>;
+  loginWithGoogleOneTap: (
+    credential: string,
+    intent?: GoogleOAuthIntent,
+  ) => Promise<GoogleOneTapAuthResponse>;
+  completeGoogleAuth: () => Promise<AuthUser>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
   deactivateAccount: (passwordConfirm: string) => Promise<void>;
@@ -54,10 +61,56 @@ interface AuthState {
   updateProfile: (
     patch: Partial<Omit<AuthUser, "avatarUrl">> & { avatarUrl?: string | null },
   ) => Promise<AuthUser | null>;
-  changePassword: (payload: { currentPassword: string; newPassword: string }) => Promise<void>;
+  changePassword: (payload: { currentPassword?: string; newPassword: string }) => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
   resetPassword: (payload: { token: string; newPassword: string }) => Promise<void>;
   refreshProfile: () => Promise<AuthUser | null>;
+}
+
+// Coalesce concurrent cookie refresh/exchange calls (StrictMode + AppProviders) to prevent false reuse revocation
+let inFlightCookieSessionPromise: Promise<AuthUser> | null = null;
+let lastCompletedCookieAuthAt = 0;
+
+async function establishSessionFromRefreshCookie(): Promise<AuthUser> {
+  if (inFlightCookieSessionPromise) {
+    return inFlightCookieSessionPromise;
+  }
+
+  const current = useAuthStore.getState();
+  if (
+    current.isAuthenticated &&
+    current.user &&
+    Date.now() - lastCompletedCookieAuthAt < 5000
+  ) {
+    return current.user;
+  }
+
+  inFlightCookieSessionPromise = (async () => {
+    const res = await apiClient.post<{ user: AuthUser; accessToken: string }>("/auth/refresh-token");
+    if (!res?.accessToken || !res?.user) {
+      throw new Error("Unable to establish your authenticated session.");
+    }
+
+    setStoredTokens(res.accessToken);
+    const enrichedUser = await apiClient.get<AuthUser>("/auth/me").catch(() => res.user);
+    lastCompletedCookieAuthAt = Date.now();
+
+    useAuthStore.setState({
+      user: enrichedUser,
+      isAuthenticated: true,
+      isLoading: false,
+      isInitialized: true,
+    });
+
+    useWishlistStore.getState().syncFromBackend().catch(() => {});
+    await useCartStore.getState().mergeWithBackend().catch(() => ({ warnings: [], mergedCount: 0 }));
+
+    return enrichedUser;
+  })().finally(() => {
+    inFlightCookieSessionPromise = null;
+  });
+
+  return inFlightCookieSessionPromise;
 }
 
 export const useAuthStore = create<AuthState>()((set, get) => ({
@@ -67,6 +120,15 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   isInitialized: false,
 
   initialize: async () => {
+    if (
+      typeof window !== "undefined" &&
+      window.location.pathname === "/auth/google/callback"
+    ) {
+      // Let the OAuth callback route establish or display the callback result without racing refresh rotation
+      set({ isLoading: false, isInitialized: true });
+      return;
+    }
+
     set({ isLoading: true });
     try {
       const token = getStoredAccessToken();
@@ -81,16 +143,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           // Token invalid or refresh failed, handled by interceptor
         }
       } else {
-        // Attempt silent refresh via HTTP-only cookie
         try {
-          const res = await apiClient.post<{ user: AuthUser; accessToken: string }>("/auth/refresh-token");
-          if (res?.accessToken && res?.user) {
-            setStoredTokens(res.accessToken);
-            set({ user: res.user, isAuthenticated: true, isLoading: false, isInitialized: true });
-            useWishlistStore.getState().syncFromBackend().catch(() => {});
-            useCartStore.getState().syncFromBackend().catch(() => {});
-            return;
-          }
+          await establishSessionFromRefreshCookie();
+          return;
         } catch {
           // No active session cookie
         }
@@ -117,9 +172,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         setStoredTokens(res.accessToken, res.refreshToken);
       }
 
-      set({ user: res.user, isAuthenticated: true, isLoading: false });
+      set({ user: res.user, isAuthenticated: true, isLoading: false, isInitialized: true });
       useWishlistStore.getState().syncFromBackend().catch(() => {});
-      useCartStore.getState().syncFromBackend().catch(() => {});
+      await useCartStore.getState().mergeWithBackend().catch(() => ({ warnings: [], mergedCount: 0 }));
       return res.user;
     } catch (error) {
       set({ isLoading: false });
@@ -147,9 +202,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         setStoredTokens(res.accessToken, res.refreshToken);
       }
 
-      set({ user: res.user, isAuthenticated: true, isLoading: false });
+      set({ user: res.user, isAuthenticated: true, isLoading: false, isInitialized: true });
       useWishlistStore.getState().syncFromBackend().catch(() => {});
-      useCartStore.getState().syncFromBackend().catch(() => {});
+      await useCartStore.getState().mergeWithBackend().catch(() => ({ warnings: [], mergedCount: 0 }));
       return res.user;
     } catch (error) {
       set({ isLoading: false });
@@ -157,14 +212,56 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     }
   },
 
+  loginWithGoogleOneTap: async (credential, intent = "login") => {
+    set({ isLoading: true });
+    try {
+      const res = await apiClient.post<GoogleOneTapAuthResponse>("/auth/google/one-tap", {
+        credential,
+        intent,
+      });
+
+      if (res?.accessToken) {
+        setStoredTokens(res.accessToken, res.refreshToken);
+      }
+
+      const authUser = res.user as unknown as AuthUser;
+      set({
+        user: authUser,
+        isAuthenticated: true,
+        isLoading: false,
+        isInitialized: true,
+      });
+      lastCompletedCookieAuthAt = Date.now();
+      useWishlistStore.getState().syncFromBackend().catch(() => {});
+      await useCartStore.getState().mergeWithBackend().catch(() => ({ warnings: [], mergedCount: 0 }));
+      return res;
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  completeGoogleAuth: async () => {
+    set({ isLoading: true });
+    try {
+      return await establishSessionFromRefreshCookie();
+    } catch (error) {
+      clearStoredTokens();
+      set({ user: null, isAuthenticated: false, isLoading: false, isInitialized: true });
+      throw error;
+    }
+  },
+
   logout: async () => {
     set({ isLoading: true });
+    lastCompletedCookieAuthAt = 0;
     try {
       await apiClient.post("/auth/logout").catch(() => {});
     } finally {
       clearStoredTokens();
       useWishlistStore.getState().clear();
       useCartStore.getState().clearCart();
+      useNotificationStore.getState().reset();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
@@ -193,28 +290,45 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (res?.accessToken) {
       setStoredTokens(res.accessToken, res.refreshToken);
     }
+    const current = get().user;
+    if (current) {
+      const nextProviders = current.authProviders?.includes("password")
+        ? current.authProviders
+        : [...(current.authProviders ?? []), "password" as const];
+      set({
+        user: {
+          ...current,
+          hasPassword: true,
+          authProviders: nextProviders,
+        },
+      });
+    }
   },
 
   logoutAll: async () => {
     set({ isLoading: true });
+    lastCompletedCookieAuthAt = 0;
     try {
       await apiClient.post("/auth/logout-all").catch(() => {});
     } finally {
       clearStoredTokens();
       useWishlistStore.getState().clear();
       useCartStore.getState().clearCart();
+      useNotificationStore.getState().reset();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
 
   deactivateAccount: async (passwordConfirm: string) => {
     set({ isLoading: true });
+    lastCompletedCookieAuthAt = 0;
     try {
       await apiClient.post("/auth/deactivate", { passwordConfirm });
     } finally {
       clearStoredTokens();
       useWishlistStore.getState().clear();
       useCartStore.getState().clearCart();
+      useNotificationStore.getState().reset();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
@@ -256,5 +370,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
 // Wire silent unauthorized callback
 onUnauthorized(() => {
+  lastCompletedCookieAuthAt = 0;
+  useNotificationStore.getState().reset();
   useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
 });

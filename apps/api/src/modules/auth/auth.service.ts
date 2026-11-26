@@ -1,5 +1,6 @@
 import { HTTP_STATUS, resolveUploadedAvatarUrl } from "@addisgebeya/shared";
-import { Role } from "@prisma/client";
+import type { AuthProviderName, GoogleOAuthIntent } from "@addisgebeya/types";
+import { AuthProvider, Prisma, Role } from "@prisma/client";
 import { prisma } from "../../config/database.js";
 import { AppError } from "../../utils/app-error.js";
 import {
@@ -10,6 +11,8 @@ import {
 } from "../../utils/jwt.js";
 import { hashPassword, verifyPassword } from "../../utils/password.js";
 import { cloudinaryService } from "../media/cloudinary.service.js";
+import { notificationService } from "../notifications/notification.service.js";
+import type { VerifiedGoogleIdentity } from "./google-oauth.strategy.js";
 
 export interface RegisterInput {
   name: string;
@@ -28,7 +31,67 @@ export interface LoginInput {
 
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 
+interface UserAuthShape {
+  id: string;
+  fullName: string;
+  email: string;
+  phoneNumber: string | null;
+  passwordHash: string | null;
+  role: Role;
+  preferredSize: number | null;
+  subCity: string | null;
+  avatarUrl: string | null;
+  oauthAccounts?: Array<{ provider: AuthProvider }>;
+  addresses?: Array<{ subCity: string }>;
+}
+
+function getAuthProvidersForUser(user: Pick<UserAuthShape, "passwordHash" | "oauthAccounts">): AuthProviderName[] {
+  const providers: AuthProviderName[] = [];
+  if (user.passwordHash) {
+    providers.push("password");
+  }
+  if (user.oauthAccounts?.some((account) => account.provider === AuthProvider.GOOGLE)) {
+    providers.push("google");
+  }
+  return providers;
+}
+
+function formatBasicAuthUser(user: UserAuthShape) {
+  return {
+    id: user.id,
+    name: user.fullName,
+    email: user.email,
+    phone: user.phoneNumber ?? "",
+    role: user.role.toLowerCase() as "customer" | "admin",
+    preferredSize: user.preferredSize ?? 42,
+    subCity: user.subCity ?? user.addresses?.[0]?.subCity ?? "",
+    avatarUrl: resolveUploadedAvatarUrl(user.avatarUrl),
+    hasPassword: Boolean(user.passwordHash),
+    authProviders: getAuthProvidersForUser(user),
+  };
+}
+
 export class AuthService {
+  private async issueSessionTokens(
+    user: { id: string; role: Role },
+    db: Pick<Prisma.TransactionClient, "refreshToken"> = prisma,
+  ) {
+    const accessToken = signAccessToken({ sub: user.id, role: user.role });
+    const refreshToken = signRefreshToken({ sub: user.id, role: user.role });
+    const tokenHash = hashToken(refreshToken);
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+
+    await db.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      },
+    });
+
+    return { accessToken, refreshToken };
+  }
+
   async register(input: RegisterInput) {
     const email = input.email.trim().toLowerCase();
 
@@ -60,59 +123,68 @@ export class AuthService {
     const passwordHash = await hashPassword(input.password);
 
     // SECURITY: Always assign CUSTOMER role for public registration. Never allow admin self-grant!
-    const user = await prisma.user.create({
-      data: {
-        fullName: input.name.trim(),
-        email,
-        phoneNumber: input.phone || "+251911000000",
-        passwordHash,
-        role: Role.CUSTOMER,
-        preferredSize: input.preferredSize ?? 42,
-        subCity: input.subCity ?? "Bole (Rwanda / Edna / Japan / Atlas)",
-        cart: { create: {} },
-        wishlist: { create: {} },
-        addresses: input.subCity
-          ? {
-              create: {
-                fullName: input.name.trim(),
-                phoneNumber: input.phone || "+251911000000",
-                region: "Addis Ababa",
-                city: "Addis Ababa",
-                subCity: input.subCity,
-                landmark: input.landmark,
-                isDefault: true,
-              },
-            }
-          : undefined,
-      },
+    const { user, accessToken, refreshToken } = await prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
+        data: {
+          fullName: input.name.trim(),
+          email,
+          phoneNumber: input.phone || "+251911000000",
+          passwordHash,
+          role: Role.CUSTOMER,
+          preferredSize: input.preferredSize ?? 42,
+          subCity: input.subCity ?? "Bole (Rwanda / Edna / Japan / Atlas)",
+          cart: { create: {} },
+          wishlist: { create: {} },
+          addresses: input.subCity
+            ? {
+                create: {
+                  fullName: input.name.trim(),
+                  phoneNumber: input.phone || "+251911000000",
+                  region: "Addis Ababa",
+                  city: "Addis Ababa",
+                  subCity: input.subCity,
+                  landmark: input.landmark,
+                  isDefault: true,
+                },
+              }
+            : undefined,
+        },
+        include: {
+          oauthAccounts: { select: { provider: true } },
+        },
+      });
+
+      const tokens = await this.issueSessionTokens(createdUser, tx);
+
+      await notificationService.notifyAdmins(
+        {
+          title: `New Customer Registered — ${createdUser.fullName}`,
+          message: `${createdUser.fullName} (${createdUser.subCity ?? "Addis Ababa"}) joined AddisGebeya on ${createdUser.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}.`,
+          type: "admin_customer_registered",
+          relatedEntityId: createdUser.id,
+          relatedEntityType: "customer",
+          metadata: {
+            customerId: createdUser.id,
+            customerName: createdUser.fullName,
+            subCity: createdUser.subCity ?? null,
+            registeredAt: createdUser.createdAt.toISOString(),
+          },
+          idempotencyKey: `admin-customer-registered:${createdUser.id}`,
+        },
+        tx,
+      );
+
+      return {
+        user: createdUser,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      };
     });
 
-    const accessToken = signAccessToken({ sub: user.id, role: user.role });
-    const refreshToken = signRefreshToken({ sub: user.id, role: user.role });
-
-    // Store hashed refresh token in database
-    const tokenHash = hashToken(refreshToken);
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        expiresAt,
-      },
-    });
+    void notificationService.flushOutbox();
 
     return {
-      user: {
-        id: user.id,
-        name: user.fullName,
-        email: user.email,
-        phone: user.phoneNumber ?? "",
-        role: user.role.toLowerCase() as "customer" | "admin",
-        preferredSize: user.preferredSize ?? 42,
-        subCity: user.subCity ?? "",
-        avatarUrl: resolveUploadedAvatarUrl(user.avatarUrl),
-      },
+      user: formatBasicAuthUser(user),
       accessToken,
       refreshToken,
     };
@@ -131,7 +203,10 @@ export class AuthService {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { addresses: true },
+      include: {
+        addresses: true,
+        oauthAccounts: { select: { provider: true } },
+      },
     });
 
     if (!user) {
@@ -150,6 +225,14 @@ export class AuthService {
       });
     }
 
+    if (!user.passwordHash) {
+      throw new AppError({
+        message: "This account uses Google Sign-In. Please continue with Google or set a password.",
+        statusCode: HTTP_STATUS.UNAUTHORIZED,
+        code: "INVALID_CREDENTIALS",
+      });
+    }
+
     const isMatch = await verifyPassword(input.password, user.passwordHash);
     if (!isMatch) {
       throw new AppError({
@@ -159,35 +242,242 @@ export class AuthService {
       });
     }
 
-    const accessToken = signAccessToken({ sub: user.id, role: user.role });
-    const refreshToken = signRefreshToken({ sub: user.id, role: user.role });
-
-    // Store hashed refresh token in DB
-    const tokenHash = hashToken(refreshToken);
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        expiresAt,
-      },
-    });
+    const { accessToken, refreshToken } = await this.issueSessionTokens(user);
 
     return {
-      user: {
-        id: user.id,
-        name: user.fullName,
-        email: user.email,
-        phone: user.phoneNumber ?? "",
-        role: user.role.toLowerCase() as "customer" | "admin",
-        preferredSize: user.preferredSize ?? 42,
-        subCity: user.subCity ?? user.addresses[0]?.subCity ?? "",
-        avatarUrl: resolveUploadedAvatarUrl(user.avatarUrl),
-      },
+      user: formatBasicAuthUser(user),
       accessToken,
       refreshToken,
     };
+  }
+
+  async authenticateWithGoogle(
+    identity: VerifiedGoogleIdentity,
+    _intent: GoogleOAuthIntent = "login",
+  ) {
+    const email = identity.email.trim().toLowerCase();
+    const googleId = identity.googleId.trim();
+
+    if (!googleId || !email) {
+      throw new AppError({
+        message: "Google authentication did not provide valid account details.",
+        statusCode: HTTP_STATUS.UNAUTHORIZED,
+        code: "INVALID_GOOGLE_IDENTITY",
+      });
+    }
+
+    if (!identity.emailVerified) {
+      throw new AppError({
+        message: "Your Google email address must be verified before continuing.",
+        statusCode: HTTP_STATUS.FORBIDDEN,
+        code: "EMAIL_NOT_VERIFIED",
+      });
+    }
+
+    const sanitizedGoogleAvatar = resolveUploadedAvatarUrl(identity.avatarUrl);
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const existingOAuth = await tx.oAuthAccount.findUnique({
+          where: {
+            provider_providerAccountId: {
+              provider: AuthProvider.GOOGLE,
+              providerAccountId: googleId,
+            },
+          },
+          include: {
+            user: {
+              include: {
+                addresses: true,
+                oauthAccounts: { select: { provider: true } },
+              },
+            },
+          },
+        });
+
+        let targetUser: UserAuthShape;
+        let isNewUser = false;
+        let linkedExistingAccount = false;
+
+        if (existingOAuth) {
+          if (!existingOAuth.user.isActive) {
+            throw new AppError({
+              message: "This account has been deactivated. Please contact support.",
+              statusCode: HTTP_STATUS.FORBIDDEN,
+              code: "ACCOUNT_DEACTIVATED",
+            });
+          }
+
+          await tx.oAuthAccount.update({
+            where: { id: existingOAuth.id },
+            data: {
+              providerEmail: email,
+              providerName: identity.fullName,
+              providerAvatarUrl: sanitizedGoogleAvatar ?? existingOAuth.providerAvatarUrl,
+              emailVerified: true,
+            },
+          });
+
+          const shouldUpdateAvatar =
+            Boolean(sanitizedGoogleAvatar) &&
+            (!existingOAuth.user.avatarUrl ||
+              existingOAuth.user.avatarUrl === existingOAuth.providerAvatarUrl);
+
+          const updatedUser = await tx.user.update({
+            where: { id: existingOAuth.user.id },
+            data: {
+              emailVerifiedAt: existingOAuth.user.emailVerifiedAt ?? new Date(),
+              ...(shouldUpdateAvatar ? { avatarUrl: sanitizedGoogleAvatar } : {}),
+            },
+            include: {
+              addresses: true,
+              oauthAccounts: { select: { provider: true } },
+            },
+          });
+
+          targetUser = updatedUser;
+        } else {
+          const existingByEmail = await tx.user.findUnique({
+            where: { email },
+            include: {
+              addresses: true,
+              oauthAccounts: true,
+            },
+          });
+
+          if (existingByEmail) {
+            if (!existingByEmail.isActive) {
+              throw new AppError({
+                message: "This account has been deactivated. Please contact support.",
+                statusCode: HTTP_STATUS.FORBIDDEN,
+                code: "ACCOUNT_DEACTIVATED",
+              });
+            }
+
+            const existingGoogleAccount = existingByEmail.oauthAccounts.find(
+              (account) => account.provider === AuthProvider.GOOGLE,
+            );
+            if (existingGoogleAccount && existingGoogleAccount.providerAccountId !== googleId) {
+              throw new AppError({
+                message: "This email address is already linked to another Google account.",
+                statusCode: HTTP_STATUS.CONFLICT,
+                code: "OAUTH_ACCOUNT_CONFLICT",
+              });
+            }
+
+            if (!existingGoogleAccount) {
+              await tx.oAuthAccount.create({
+                data: {
+                  userId: existingByEmail.id,
+                  provider: AuthProvider.GOOGLE,
+                  providerAccountId: googleId,
+                  providerEmail: email,
+                  providerName: identity.fullName,
+                  providerAvatarUrl: sanitizedGoogleAvatar ?? null,
+                  emailVerified: true,
+                },
+              });
+              linkedExistingAccount = true;
+            }
+
+            const updatedLinkedUser = await tx.user.update({
+              where: { id: existingByEmail.id },
+              data: {
+                emailVerifiedAt: existingByEmail.emailVerifiedAt ?? new Date(),
+                ...(!existingByEmail.avatarUrl && sanitizedGoogleAvatar
+                  ? { avatarUrl: sanitizedGoogleAvatar }
+                  : {}),
+              },
+              include: {
+                addresses: true,
+                oauthAccounts: { select: { provider: true } },
+              },
+            });
+
+            targetUser = updatedLinkedUser;
+          } else {
+            // SECURITY: Always assign CUSTOMER role for OAuth registrations.
+            const createdUser = await tx.user.create({
+              data: {
+                fullName: identity.fullName,
+                email,
+                passwordHash: null,
+                role: Role.CUSTOMER,
+                isActive: true,
+                emailVerifiedAt: new Date(),
+                preferredSize: 42,
+                avatarUrl: sanitizedGoogleAvatar ?? null,
+                cart: { create: {} },
+                wishlist: { create: {} },
+                oauthAccounts: {
+                  create: {
+                    provider: AuthProvider.GOOGLE,
+                    providerAccountId: googleId,
+                    providerEmail: email,
+                    providerName: identity.fullName,
+                    providerAvatarUrl: sanitizedGoogleAvatar ?? null,
+                    emailVerified: true,
+                  },
+                },
+              },
+              include: {
+                addresses: true,
+                oauthAccounts: { select: { provider: true } },
+              },
+            });
+
+            await notificationService.notifyAdmins(
+              {
+                title: `New Customer Registered — ${createdUser.fullName}`,
+                message: `${createdUser.fullName} registered via Google OAuth on ${createdUser.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}.`,
+                type: "admin_customer_registered",
+                relatedEntityId: createdUser.id,
+                relatedEntityType: "customer",
+                metadata: {
+                  customerId: createdUser.id,
+                  customerName: createdUser.fullName,
+                  authProvider: "google",
+                  registeredAt: createdUser.createdAt.toISOString(),
+                },
+                idempotencyKey: `admin-customer-registered:${createdUser.id}`,
+              },
+              tx,
+            );
+
+            targetUser = createdUser;
+            isNewUser = true;
+          }
+        }
+
+        const tokens = await this.issueSessionTokens(targetUser, tx);
+
+        return {
+          user: formatBasicAuthUser(targetUser),
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          isNewUser,
+          linkedExistingAccount,
+        };
+      });
+
+      if (result.isNewUser) {
+        void notificationService.flushOutbox();
+      }
+
+      return result;
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new AppError({
+          message: "An account conflict occurred during Google authentication. Please try again.",
+          statusCode: HTTP_STATUS.CONFLICT,
+          code: "OAUTH_ACCOUNT_CONFLICT",
+        });
+      }
+      throw error;
+    }
   }
 
   async refreshToken(refreshTokenStr: string) {
@@ -199,9 +489,8 @@ export class AuthService {
       });
     }
 
-    let payload;
     try {
-      payload = verifyRefreshToken(refreshTokenStr);
+      verifyRefreshToken(refreshTokenStr);
     } catch {
       throw new AppError({
         message: "Invalid or expired refresh token signature",
@@ -213,12 +502,21 @@ export class AuthService {
     const tokenHash = hashToken(refreshTokenStr);
     const storedToken = await prisma.refreshToken.findUnique({
       where: { tokenHash },
-      include: { user: true },
+      include: {
+        user: {
+          include: {
+            addresses: {
+              orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+              take: 1,
+            },
+            oauthAccounts: { select: { provider: true } },
+          },
+        },
+      },
     });
 
     // SECURITY: Detect and revoke reused refresh tokens!
     if (storedToken && storedToken.revokedAt !== null) {
-      // Compomised token chain: immediately revoke ALL active refresh tokens for this user!
       await prisma.refreshToken.updateMany({
         where: { userId: storedToken.userId, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -265,39 +563,13 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
 
-    const newAccessToken = signAccessToken({
-      sub: storedToken.user.id,
-      role: storedToken.user.role,
-    });
-    const newRefreshToken = signRefreshToken({
-      sub: storedToken.user.id,
-      role: storedToken.user.role,
-    });
-
-    const newTokenHash = hashToken(newRefreshToken);
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-
-    await prisma.refreshToken.create({
-      data: {
-        userId: storedToken.user.id,
-        tokenHash: newTokenHash,
-        expiresAt,
-      },
-    });
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } =
+      await this.issueSessionTokens(storedToken.user);
 
     return {
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
-      user: {
-        id: storedToken.user.id,
-        name: storedToken.user.fullName,
-        email: storedToken.user.email,
-        phone: storedToken.user.phoneNumber ?? "",
-        role: storedToken.user.role.toLowerCase() as "customer" | "admin",
-        preferredSize: storedToken.user.preferredSize ?? 42,
-        subCity: storedToken.user.subCity ?? "",
-        avatarUrl: resolveUploadedAvatarUrl(storedToken.user.avatarUrl),
-      },
+      user: formatBasicAuthUser(storedToken.user),
     };
   }
 
@@ -319,9 +591,9 @@ export class AuthService {
   }
 
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
-    if (!currentPassword || !newPassword) {
+    if (!newPassword) {
       throw new AppError({
-        message: "Current password and new password are required",
+        message: "New password is required",
         statusCode: HTTP_STATUS.BAD_REQUEST,
         code: "MISSING_PASSWORD_FIELDS",
       });
@@ -344,23 +616,34 @@ export class AuthService {
       });
     }
 
-    const isMatch = await verifyPassword(currentPassword, user.passwordHash);
-    if (!isMatch) {
-      throw new AppError({
-        message: "Current password is incorrect",
-        statusCode: HTTP_STATUS.BAD_REQUEST,
-        code: "INVALID_CURRENT_PASSWORD",
-      });
-    }
+    const hadPassword = Boolean(user.passwordHash);
+    if (user.passwordHash) {
+      if (!currentPassword) {
+        throw new AppError({
+          message: "Current password and new password are required",
+          statusCode: HTTP_STATUS.BAD_REQUEST,
+          code: "MISSING_PASSWORD_FIELDS",
+        });
+      }
 
-    // Prevent reuse of current password
-    const isSameAsCurrent = await verifyPassword(newPassword, user.passwordHash);
-    if (isSameAsCurrent) {
-      throw new AppError({
-        message: "New password cannot be the same as your current password",
-        statusCode: HTTP_STATUS.BAD_REQUEST,
-        code: "PASSWORD_REUSED",
-      });
+      const isMatch = await verifyPassword(currentPassword, user.passwordHash);
+      if (!isMatch) {
+        throw new AppError({
+          message: "Current password is incorrect",
+          statusCode: HTTP_STATUS.BAD_REQUEST,
+          code: "INVALID_CURRENT_PASSWORD",
+        });
+      }
+
+      // Prevent reuse of current password
+      const isSameAsCurrent = await verifyPassword(newPassword, user.passwordHash);
+      if (isSameAsCurrent) {
+        throw new AppError({
+          message: "New password cannot be the same as your current password",
+          statusCode: HTTP_STATUS.BAD_REQUEST,
+          code: "PASSWORD_REUSED",
+        });
+      }
     }
 
     const newHash = await hashPassword(newPassword);
@@ -375,31 +658,16 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
 
-    // Issue a clean new session for current device
-    const newAccessToken = signAccessToken({
-      sub: user.id,
-      role: user.role,
-    });
-    const newRefreshToken = signRefreshToken({
-      sub: user.id,
-      role: user.role,
-    });
-    const newTokenHash = hashToken(newRefreshToken);
-    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: newTokenHash,
-        expiresAt,
-      },
-    });
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } =
+      await this.issueSessionTokens(user);
 
     return {
       changed: true,
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
-      message: "Password changed successfully. Other active sessions have been revoked.",
+      message: hadPassword
+        ? "Password changed successfully. Other active sessions have been revoked."
+        : "Password created successfully. You can now sign in with email and password or Google.",
     };
   }
 
@@ -432,16 +700,26 @@ export class AuthService {
 
     if (!passwordConfirm) {
       throw new AppError({
-        message: "Password confirmation is required to deactivate account",
+        message: user.passwordHash
+          ? "Password confirmation is required to deactivate account"
+          : "Confirmation is required to deactivate account",
         statusCode: HTTP_STATUS.BAD_REQUEST,
         code: "PASSWORD_REQUIRED",
       });
     }
 
-    const isMatch = await verifyPassword(passwordConfirm, user.passwordHash);
-    if (!isMatch) {
+    if (user.passwordHash) {
+      const isMatch = await verifyPassword(passwordConfirm, user.passwordHash);
+      if (!isMatch) {
+        throw new AppError({
+          message: "Incorrect password. Account deactivation cancelled.",
+          statusCode: HTTP_STATUS.BAD_REQUEST,
+          code: "INVALID_PASSWORD",
+        });
+      }
+    } else if (passwordConfirm.trim().toUpperCase() !== "DEACTIVATE") {
       throw new AppError({
-        message: "Incorrect password. Account deactivation cancelled.",
+        message: 'Type "DEACTIVATE" to confirm deactivation of your Google-linked account.',
         statusCode: HTTP_STATUS.BAD_REQUEST,
         code: "INVALID_PASSWORD",
       });
@@ -512,6 +790,9 @@ export class AuthService {
         addresses: {
           orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
         },
+        oauthAccounts: {
+          select: { provider: true },
+        },
       },
     });
 
@@ -523,7 +804,6 @@ export class AuthService {
       });
     }
 
-    // Aggregate user order stats
     const totalOrders = await prisma.order.count({ where: { userId } });
     const recentOrders = await prisma.order.findMany({
       where: { userId },
@@ -548,22 +828,15 @@ export class AuthService {
     });
 
     const defaultAddress = user.addresses.find((a) => a.isDefault) ?? user.addresses[0] ?? null;
-
     const nameParts = user.fullName.split(" ");
     const firstName = nameParts[0] || "";
     const lastName = nameParts.slice(1).join(" ") || "";
 
     return {
-      id: user.id,
-      name: user.fullName,
+      ...formatBasicAuthUser(user),
       firstName,
       lastName,
-      email: user.email,
-      phone: user.phoneNumber ?? "",
-      role: user.role.toLowerCase() as "customer" | "admin",
-      preferredSize: user.preferredSize ?? 42,
       subCity: user.subCity ?? defaultAddress?.subCity ?? "",
-      avatarUrl: resolveUploadedAvatarUrl(user.avatarUrl),
       dateOfBirth: user.dateOfBirth ? user.dateOfBirth.toISOString().slice(0, 10) : null,
       emailVerifiedAt: user.emailVerifiedAt ? user.emailVerifiedAt.toISOString() : null,
       isActive: user.isActive,
@@ -608,7 +881,6 @@ export class AuthService {
       });
     }
 
-    // Determine target full name
     let nextFullName: string | undefined = undefined;
     if (patch.name?.trim()) {
       nextFullName = patch.name.trim();
@@ -620,7 +892,6 @@ export class AuthService {
       nextFullName = `${f} ${l}`.trim() || user.fullName;
     }
 
-    // Email update & uniqueness verification
     let nextEmail: string | undefined = undefined;
     if (patch.email && patch.email.trim().toLowerCase() !== user.email) {
       const normalizedEmail = patch.email.trim().toLowerCase();
@@ -637,7 +908,6 @@ export class AuthService {
       nextEmail = normalizedEmail;
     }
 
-    // Parse date of birth
     let nextDob: Date | null | undefined = undefined;
     if (patch.dateOfBirth !== undefined) {
       if (patch.dateOfBirth === null || patch.dateOfBirth === "") {
@@ -677,6 +947,9 @@ export class AuthService {
         avatarUrl: nextAvatarUrl,
         dateOfBirth: nextDob,
       },
+      include: {
+        oauthAccounts: { select: { provider: true } },
+      },
     });
 
     const nameParts = updated.fullName.split(" ");
@@ -684,16 +957,9 @@ export class AuthService {
     const lastName = nameParts.slice(1).join(" ") || "";
 
     return {
-      id: updated.id,
-      name: updated.fullName,
+      ...formatBasicAuthUser(updated),
       firstName,
       lastName,
-      email: updated.email,
-      phone: updated.phoneNumber ?? "",
-      role: updated.role.toLowerCase() as "customer" | "admin",
-      preferredSize: updated.preferredSize ?? 42,
-      subCity: updated.subCity ?? "",
-      avatarUrl: resolveUploadedAvatarUrl(updated.avatarUrl),
       dateOfBirth: updated.dateOfBirth ? updated.dateOfBirth.toISOString().slice(0, 10) : null,
       emailVerifiedAt: updated.emailVerifiedAt ? updated.emailVerifiedAt.toISOString() : null,
       isActive: updated.isActive,

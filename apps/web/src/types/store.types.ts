@@ -19,6 +19,18 @@ export type ProductStatus = "active" | "draft" | "archived";
 
 export type {
   AdminPaymentRecordDto,
+  AuthProviderName,
+  DeleteNotificationResponse,
+  GoogleOAuthCallbackQuery,
+  GoogleOAuthIntent,
+  MarkAllNotificationsReadResponse,
+  MarkNotificationReadResponse,
+  NotificationCategoryFilter,
+  NotificationDto as NotificationRecord,
+  NotificationDto,
+  NotificationRelatedEntityType,
+  NotificationType,
+  PaginatedNotificationsResponse,
   PaymentFormatOption,
   PaymentProviderConfigDto,
   PaymentProviderInfo,
@@ -30,7 +42,15 @@ export type {
   ReceiptAccessUrlResponse,
   ReceiptCaptureMethod,
   ReceiptOcrExtractionDto,
+  SocketAdminActivityPayload,
+  SocketConnectionReadyPayload,
+  SocketNotificationDeletedPayload,
+  SocketNotificationNewPayload,
+  SocketNotificationReadAllPayload,
+  SocketNotificationReadPayload,
+  SocketNotificationSyncedPayload,
   SubmitPaymentReceiptResponse,
+  UnreadNotificationCountResponse,
   VerificationSource,
 } from "@addisgebeya/types";
 
@@ -321,6 +341,8 @@ export interface AuthUser {
   dateOfBirth?: string | null;
   emailVerifiedAt?: string | null;
   isActive?: boolean;
+  hasPassword?: boolean;
+  authProviders?: Array<"password" | "google">;
   createdAt?: string;
   totalOrders?: number;
   recentOrders?: Array<{
@@ -357,15 +379,6 @@ export interface AddressRecord {
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface NotificationRecord {
-  id: string;
-  userId: string;
-  title: string;
-  message: string;
-  isRead: boolean;
-  createdAt: string;
 }
 
 

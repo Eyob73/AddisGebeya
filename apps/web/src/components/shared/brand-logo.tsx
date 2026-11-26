@@ -19,8 +19,10 @@ export function BrandLogo({
     <img
       src="/images/addisgebeya-logo.png"
       alt="AddisGebeya Shoes — Step into Your Style"
+      width={1536}
+      height={1024}
       className={cn(
-        "object-contain transition-transform duration-300 hover:scale-[1.03]",
+        "object-contain transition-transform duration-300 hover:scale-[1.03] dark:rounded-xl dark:bg-white/95 dark:px-2 dark:py-0.5",
         imgClassName,
       )}
     />

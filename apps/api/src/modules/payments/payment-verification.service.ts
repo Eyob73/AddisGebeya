@@ -18,6 +18,7 @@ import type {
 } from "@addisgebeya/types";
 import {
   adminPaymentFilterQuerySchema,
+  adminRefundPaymentSchema,
   adminReviewPaymentSchema,
   extractReceiptOcrSchema,
   submitPaymentReceiptSchema,
@@ -302,12 +303,42 @@ function assertValidSubmittedOfficialUrl(
   return validated;
 }
 
+export interface PaymentActor {
+  userId?: string | null;
+  guestSessionId?: string | null;
+  role: "CUSTOMER" | "ADMIN";
+}
+
+function canActorAccessOrder(
+  order: { userId?: string | null; guestSessionId?: string | null },
+  actor: PaymentActor,
+  receiptUserId?: string | null,
+): boolean {
+  if (actor.role === "ADMIN") {
+    return true;
+  }
+  if (actor.userId) {
+    return (
+      (Boolean(receiptUserId) && receiptUserId === actor.userId) ||
+      (Boolean(order.userId) && order.userId === actor.userId)
+    );
+  }
+  if (actor.guestSessionId) {
+    return (
+      !order.userId &&
+      Boolean(order.guestSessionId) &&
+      order.guestSessionId === actor.guestSessionId
+    );
+  }
+  return false;
+}
+
 function mapReceiptRecordToDto(
   r: {
     id: string;
     paymentId: string;
     orderId: string;
-    userId: string;
+    userId: string | null;
     provider: string;
     transactionReference: string | null;
     extractedReference: string | null;
@@ -508,7 +539,7 @@ export class PaymentVerificationService {
 
   async verifyPayment(
     rawInput: unknown,
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" },
+    actor: PaymentActor,
   ): Promise<PaymentVerificationResponse> {
     const input = verifyPaymentRequestSchema.parse(rawInput);
     const providerCode = input.provider.trim().toLowerCase();
@@ -536,15 +567,13 @@ export class PaymentVerificationService {
       });
     }
 
-    // 2. Customer ownership check (prevent verifying another customer's order)
-    if (actor.role !== "ADMIN") {
-      if (!order.userId || order.userId !== actor.userId) {
-        throw new AppError({
-          message: "You do not have permission to verify payment for this order.",
-          statusCode: HTTP_STATUS.FORBIDDEN,
-          code: "FORBIDDEN",
-        });
-      }
+    // 2. Customer / verified guest session ownership check
+    if (!canActorAccessOrder(order, actor)) {
+      throw new AppError({
+        message: "You do not have permission to verify payment for this order.",
+        statusCode: HTTP_STATUS.FORBIDDEN,
+        code: "FORBIDDEN",
+      });
     }
 
     // 3. Validate provider is live and configured
@@ -1162,17 +1191,82 @@ export class PaymentVerificationService {
             data: {
               paymentId: payment.id,
               orderId: order.id,
-              userId: actor.userId,
+              userId: actor.userId ?? null,
               provider: providerCode,
               submittedReference: submittedReference || canonicalBankRef,
               verificationStatus: "Paid",
               chekiHttpStatus: 200,
               responseData: sanitizedResponse,
               actorType: actor.role === "ADMIN" ? "admin" : "customer",
-              actorId: actor.userId,
+              actorId: actor.userId ?? null,
             },
           });
+
+          if (order.userId) {
+            await notificationService.createNotification(
+              {
+                userId: order.userId,
+                title: `Payment Verified — Order #${order.orderNumber}`,
+                message: `Your payment of ${expectedTotalETB.toLocaleString()} ETB via ${matchedProvider.name} (Ref: ${canonicalBankRef}) has been verified and approved.`,
+                type: "payment_verified",
+                relatedEntityId: order.orderNumber,
+                relatedEntityType: "payment",
+                metadata: {
+                  orderId: order.id,
+                  orderNumber: order.orderNumber,
+                  paymentId: payment.id,
+                  provider: providerCode,
+                  reference: canonicalBankRef,
+                  amountETB: expectedTotalETB,
+                },
+                idempotencyKey: `payment-verified:${payment.id}:${canonicalBankRef}`,
+              },
+              tx,
+            );
+
+            if (order.status !== "Confirmed") {
+              await notificationService.createNotification(
+                {
+                  userId: order.userId,
+                  title: `Order Confirmed — #${order.orderNumber}`,
+                  message: `Your order #${order.orderNumber} is now confirmed and queued for dispatch from AddisGebeya Bole hub.`,
+                  type: "order_confirmed",
+                  relatedEntityId: order.orderNumber,
+                  relatedEntityType: "order",
+                  metadata: {
+                    orderId: order.id,
+                    orderNumber: order.orderNumber,
+                  },
+                  idempotencyKey: `order-confirmed:${order.id}`,
+                },
+                tx,
+              );
+            }
+          }
+
+          await notificationService.notifyAdmins(
+            {
+              title: `Payment Verified — Order #${order.orderNumber}`,
+              message: `${order.customerName}'s ${matchedProvider.name} payment of ${expectedTotalETB.toLocaleString()} ETB (Ref: ${canonicalBankRef}) for order #${order.orderNumber} was verified.`,
+              type: "admin_payment_verified",
+              relatedEntityId: order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                paymentId: payment.id,
+                customerName: order.customerName,
+                provider: providerCode,
+                reference: canonicalBankRef,
+                amountETB: expectedTotalETB,
+              },
+              idempotencyKey: `admin-payment-verified:${payment.id}:${canonicalBankRef}`,
+            },
+            tx,
+          );
         });
+
+        void notificationService.flushOutbox();
       } catch (txErr: unknown) {
         if (
           txErr instanceof Prisma.PrismaClientKnownRequestError &&
@@ -1243,7 +1337,7 @@ export class PaymentVerificationService {
   private async restorePendingAndLog(
     paymentId: string,
     orderId: string,
-    userId: string,
+    userId: string | null | undefined,
     provider: string,
     submittedReference: string,
     restorePaymentStatus: string,
@@ -1252,6 +1346,7 @@ export class PaymentVerificationService {
     httpStatus: number,
     responseData: Prisma.InputJsonValue | null,
   ): Promise<void> {
+    const resolvedActorId = userId ?? null;
     await prisma.$transaction([
       prisma.payment.update({
         where: { id: paymentId },
@@ -1273,7 +1368,7 @@ export class PaymentVerificationService {
         data: {
           paymentId,
           orderId,
-          userId,
+          userId: resolvedActorId,
           provider,
           submittedReference: submittedReference || null,
           verificationStatus: logStatus,
@@ -1281,7 +1376,7 @@ export class PaymentVerificationService {
           chekiHttpStatus: httpStatus,
           responseData: responseData ?? Prisma.JsonNull,
           actorType: "customer",
-          actorId: userId,
+          actorId: resolvedActorId,
         },
       }),
     ]);
@@ -1290,7 +1385,7 @@ export class PaymentVerificationService {
   private async recordFailedOutcome(
     paymentId: string,
     orderId: string,
-    userId: string,
+    userId: string | null | undefined,
     provider: string,
     submittedReference: string,
     nextStatus: "Failed" | "ReviewRequired",
@@ -1298,8 +1393,9 @@ export class PaymentVerificationService {
     httpStatus: number,
     responseData: Prisma.InputJsonValue | null,
   ): Promise<void> {
-    await prisma.$transaction([
-      prisma.payment.update({
+    const resolvedActorId = userId ?? null;
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.update({
         where: { id: paymentId },
         data: {
           paymentStatus: nextStatus,
@@ -1307,20 +1403,24 @@ export class PaymentVerificationService {
           paymentMethod: provider,
           ...(submittedReference ? { transactionReference: submittedReference } : {}),
           ...(responseData ? { verificationResponse: responseData } : {}),
+          failureReason: errorMessage,
         },
-      }),
-      prisma.order.update({
+      });
+
+      const order = await tx.order.update({
         where: { id: orderId },
         data: {
           paymentStatus: nextStatus,
           status: "PendingPayment",
         },
-      }),
-      prisma.paymentVerificationLog.create({
+        select: { id: true, orderNumber: true, userId: true, customerName: true },
+      });
+
+      await tx.paymentVerificationLog.create({
         data: {
           paymentId,
           orderId,
-          userId,
+          userId: resolvedActorId,
           provider,
           submittedReference: submittedReference || null,
           verificationStatus: nextStatus,
@@ -1328,16 +1428,110 @@ export class PaymentVerificationService {
           chekiHttpStatus: httpStatus,
           responseData: responseData ?? Prisma.JsonNull,
           actorType: "customer",
-          actorId: userId,
+          actorId: resolvedActorId,
         },
-      }),
-    ]);
+      });
+
+      const customerId = order.userId ?? resolvedActorId;
+      const refTag = submittedReference || "none";
+      const eventNonce = `${Date.now()}`;
+
+      if (nextStatus === "Failed") {
+        if (customerId) {
+          await notificationService.createNotification(
+            {
+              userId: customerId,
+              title: `Payment Rejected — Order #${order.orderNumber}`,
+              message: `Payment verification failed for order #${order.orderNumber}. Reason: ${errorMessage}`,
+              type: "payment_rejected",
+              relatedEntityId: order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                paymentId,
+                provider,
+                reference: refTag,
+                reason: errorMessage,
+              },
+              idempotencyKey: `payment-rejected:${paymentId}:${refTag}:${eventNonce}`,
+            },
+            tx,
+          );
+        }
+
+        await notificationService.notifyAdmins(
+          {
+            title: `Payment Rejected — Order #${order.orderNumber}`,
+            message: `${order.customerName}'s ${provider.toUpperCase()} payment verification for order #${order.orderNumber} failed: ${errorMessage}`,
+            type: "admin_payment_rejected",
+            relatedEntityId: order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              paymentId,
+              customerName: order.customerName,
+              provider,
+              reference: refTag,
+              reason: errorMessage,
+            },
+            idempotencyKey: `admin-payment-rejected:${paymentId}:${refTag}:${eventNonce}`,
+          },
+          tx,
+        );
+      } else {
+        if (customerId) {
+          await notificationService.createNotification(
+            {
+              userId: customerId,
+              title: `Payment Requires Manual Review — Order #${order.orderNumber}`,
+              message: `Your payment for order #${order.orderNumber} requires administrator verification. Reason: ${errorMessage}`,
+              type: "payment_manual_review",
+              relatedEntityId: order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                paymentId,
+                provider,
+                reason: errorMessage,
+              },
+              idempotencyKey: `payment-manual-review:${paymentId}:${refTag}:${eventNonce}`,
+            },
+            tx,
+          );
+        }
+
+        await notificationService.notifyAdmins(
+          {
+            title: `Manual Payment Verification Required — #${order.orderNumber}`,
+            message: `${order.customerName}'s ${provider.toUpperCase()} payment for order #${order.orderNumber} was flagged for manual review: ${errorMessage}`,
+            type: "admin_payment_manual_review",
+            relatedEntityId: order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              paymentId,
+              customerName: order.customerName,
+              provider,
+              reason: errorMessage,
+            },
+            idempotencyKey: `admin-payment-manual-review:${paymentId}:${refTag}:${eventNonce}`,
+          },
+          tx,
+        );
+      }
+    });
+
+    void notificationService.flushOutbox();
   }
 
   private async flagForManualReview(
     paymentId: string,
     orderId: string,
-    userId: string,
+    userId: string | null | undefined,
     provider: string,
     reference: string,
     reason: string,
@@ -1349,6 +1543,7 @@ export class PaymentVerificationService {
       qrData?: string | null;
     },
   ): Promise<void> {
+    const resolvedActorId = userId ?? null;
     const parsedTxDate = chekiData.date ? new Date(chekiData.date) : null;
     const validTxDate =
       parsedTxDate && !Number.isNaN(parsedTxDate.getTime()) ? parsedTxDate : null;
@@ -1362,8 +1557,8 @@ export class PaymentVerificationService {
     });
     const validatedSourceUrl = validateOfficialReceiptUrl(provider, chekiData.sourceUrl);
 
-    await prisma.$transaction([
-      prisma.payment.update({
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.update({
         where: { id: paymentId },
         data: {
           paymentStatus: "ReviewRequired",
@@ -1379,20 +1574,24 @@ export class PaymentVerificationService {
           officialReceiptUrl: manualLink.officialReceiptUrl,
           cbeReceiptToken: manualLink.cbeReceiptToken,
           verificationResponse: sanitizedResponse,
+          reviewReason: reason,
         },
-      }),
-      prisma.order.update({
+      });
+
+      const order = await tx.order.update({
         where: { id: orderId },
         data: {
           paymentStatus: "ReviewRequired",
           status: "PendingPayment",
         },
-      }),
-      prisma.paymentVerificationLog.create({
+        select: { id: true, orderNumber: true, userId: true, customerName: true },
+      });
+
+      await tx.paymentVerificationLog.create({
         data: {
           paymentId,
           orderId,
-          userId,
+          userId: resolvedActorId,
           provider,
           submittedReference: reference || null,
           verificationStatus: "ReviewRequired",
@@ -1400,11 +1599,61 @@ export class PaymentVerificationService {
           chekiHttpStatus: 200,
           responseData: sanitizedResponse,
           actorType: "system",
-          actorId: userId,
+          actorId: resolvedActorId,
           reason,
         },
-      }),
-    ]);
+      });
+
+      const customerId = order.userId ?? resolvedActorId;
+      const refTag = reference || "none";
+      const eventNonce = `${Date.now()}`;
+
+      if (customerId) {
+        await notificationService.createNotification(
+          {
+            userId: customerId,
+            title: `Payment Requires Manual Verification — #${order.orderNumber}`,
+            message: `Your payment for order #${order.orderNumber} was flagged for manual review. Reason: ${reason}`,
+            type: "payment_manual_review",
+            relatedEntityId: order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              paymentId,
+              provider,
+              reference: refTag,
+              reason,
+            },
+            idempotencyKey: `payment-manual-review:${paymentId}:${refTag}:${eventNonce}`,
+          },
+          tx,
+        );
+      }
+
+      await notificationService.notifyAdmins(
+        {
+          title: `Manual Payment Review Needed — #${order.orderNumber}`,
+          message: `${order.customerName}'s ${provider.toUpperCase()} payment for order #${order.orderNumber} requires manual review: ${reason}`,
+          type: "admin_payment_manual_review",
+          relatedEntityId: order.orderNumber,
+          relatedEntityType: "payment",
+          metadata: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId,
+            customerName: order.customerName,
+            provider,
+            reference: refTag,
+            reason,
+          },
+          idempotencyKey: `admin-payment-manual-review:${paymentId}:${refTag}:${eventNonce}`,
+        },
+        tx,
+      );
+    });
+
+    void notificationService.flushOutbox();
   }
 
   async extractReceiptOcr(
@@ -1417,7 +1666,7 @@ export class PaymentVerificationService {
           size: number;
         }
       | undefined,
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" },
+    actor: PaymentActor,
   ): Promise<ReceiptOcrExtractionDto> {
     const input = extractReceiptOcrSchema.parse(rawInput ?? {});
 
@@ -1462,7 +1711,7 @@ export class PaymentVerificationService {
         });
       }
 
-      if (actor.role !== "ADMIN" && (!order.userId || order.userId !== actor.userId)) {
+      if (!canActorAccessOrder(order, actor)) {
         throw new AppError({
           message: "You do not have permission to inspect receipts for this order.",
           statusCode: HTTP_STATUS.FORBIDDEN,
@@ -1482,7 +1731,7 @@ export class PaymentVerificationService {
     receiptId: string;
     paymentId: string;
     orderId: string;
-    actorUserId: string;
+    actorUserId?: string | null;
     actorRole: "CUSTOMER" | "ADMIN";
     providerCode: string;
     reference: string;
@@ -1600,7 +1849,7 @@ export class PaymentVerificationService {
         },
       });
 
-      await tx.order.update({
+      const order = await tx.order.update({
         where: { id: params.orderId },
         data: {
           paymentMethod: params.providerCode,
@@ -1608,13 +1857,14 @@ export class PaymentVerificationService {
           status: "PendingPayment",
           ...(params.reference ? { paymentReference: params.reference } : {}),
         },
+        select: { id: true, orderNumber: true, userId: true, customerName: true },
       });
 
       await tx.paymentVerificationLog.create({
         data: {
           paymentId: params.paymentId,
           orderId: params.orderId,
-          userId: params.actorUserId,
+          userId: params.actorUserId ?? null,
           provider: params.providerCode,
           submittedReference: params.reference || null,
           verificationStatus: params.logStatus,
@@ -1622,13 +1872,70 @@ export class PaymentVerificationService {
           chekiHttpStatus: params.httpStatus ?? null,
           responseData: params.providerResponse ?? Prisma.JsonNull,
           actorType: params.actorRole === "ADMIN" ? "admin" : "system",
-          actorId: params.actorUserId,
+          actorId: params.actorUserId ?? null,
           reason: params.reason,
         },
       });
 
+      const customerId = order.userId ?? params.actorUserId ?? null;
+      const isRejected = params.receiptStatus === "Rejected";
+
+      if (customerId) {
+        await notificationService.createNotification(
+          {
+            userId: customerId,
+            title: isRejected
+              ? `Payment Rejected — Order #${order.orderNumber}`
+              : `Payment Requires Manual Verification — #${order.orderNumber}`,
+            message: isRejected
+              ? `Your payment receipt for order #${order.orderNumber} was rejected. Reason: ${params.reason}`
+              : `Your payment receipt for order #${order.orderNumber} requires manual administrator review. ${params.reason}`,
+            type: isRejected ? "payment_rejected" : "payment_manual_review",
+            relatedEntityId: order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              paymentId: params.paymentId,
+              receiptId: params.receiptId,
+              provider: params.providerCode,
+              reason: params.reason,
+            },
+            idempotencyKey: `${isRejected ? "payment-rejected" : "payment-manual-review"}:${params.receiptId}:${params.logStatus}`,
+          },
+          tx,
+        );
+      }
+
+      await notificationService.notifyAdmins(
+        {
+          title: isRejected
+            ? `Payment Rejected — Order #${order.orderNumber}`
+            : `Manual Verification Required — #${order.orderNumber}`,
+          message: isRejected
+            ? `${order.customerName}'s ${params.providerCode.toUpperCase()} payment receipt for order #${order.orderNumber} was rejected: ${params.reason}`
+            : `${order.customerName}'s ${params.providerCode.toUpperCase()} payment receipt for order #${order.orderNumber} requires manual verification: ${params.reason}`,
+          type: isRejected ? "admin_payment_rejected" : "admin_payment_manual_review",
+          relatedEntityId: order.orderNumber,
+          relatedEntityType: "payment",
+          metadata: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentId: params.paymentId,
+            receiptId: params.receiptId,
+            customerName: order.customerName,
+            provider: params.providerCode,
+            reason: params.reason,
+          },
+          idempotencyKey: `${isRejected ? "admin-payment-rejected" : "admin-payment-manual-review"}:${params.receiptId}:${params.logStatus}`,
+        },
+        tx,
+      );
+
       return receipt;
     });
+
+    void notificationService.flushOutbox();
 
     return updatedReceipt;
   }
@@ -1653,7 +1960,7 @@ export class PaymentVerificationService {
     cbeReceiptToken?: string | null;
     accountNumber?: string;
     phoneNumber?: string;
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" };
+    actor: PaymentActor;
   }): Promise<SubmitPaymentReceiptResponse> {
     const {
       receiptId,
@@ -2370,32 +2677,88 @@ export class PaymentVerificationService {
             data: {
               paymentId,
               orderId: order.id,
-              userId: actor.userId,
+              userId: actor.userId ?? null,
               provider: providerCode,
               submittedReference: canonicalBankRef,
               verificationStatus: "Verified",
               chekiHttpStatus: 200,
               responseData: sanitizedResponse,
               actorType: actor.role === "ADMIN" ? "admin" : "customer",
-              actorId: actor.userId,
+              actorId: actor.userId ?? null,
               reason: "Receipt automatically verified via Cheki provider API.",
             },
           });
 
+          const customerId = order.userId;
+          if (customerId) {
+            await notificationService.createNotification(
+              {
+                userId: customerId,
+                title: `Payment Verified — Order #${order.orderNumber}`,
+                message: `Your payment of ${expectedTotalETB.toLocaleString()} ETB via ${providerLabel} (Ref: ${canonicalBankRef}) has been verified and your order is confirmed.`,
+                type: "payment_verified",
+                relatedEntityId: order.orderNumber,
+                relatedEntityType: "payment",
+                metadata: {
+                  orderId: order.id,
+                  orderNumber: order.orderNumber,
+                  paymentId,
+                  receiptId: receipt.id,
+                  provider: providerCode,
+                  reference: canonicalBankRef,
+                  amountETB: expectedTotalETB,
+                },
+                idempotencyKey: `payment-verified:${paymentId}:${canonicalBankRef}`,
+              },
+              tx,
+            );
+
+            if (order.status !== "Confirmed") {
+              await notificationService.createNotification(
+                {
+                  userId: customerId,
+                  title: `Order Confirmed — #${order.orderNumber}`,
+                  message: `Your order #${order.orderNumber} is confirmed and queued for dispatch.`,
+                  type: "order_confirmed",
+                  relatedEntityId: order.orderNumber,
+                  relatedEntityType: "order",
+                  metadata: {
+                    orderId: order.id,
+                    orderNumber: order.orderNumber,
+                  },
+                  idempotencyKey: `order-confirmed:${order.id}`,
+                },
+                tx,
+              );
+            }
+          }
+
+          await notificationService.notifyAdmins(
+            {
+              title: `Payment Verified — Order #${order.orderNumber}`,
+              message: `${order.customerName}'s ${providerLabel} receipt (${expectedTotalETB.toLocaleString()} ETB, Ref: ${canonicalBankRef}) for order #${order.orderNumber} was automatically verified.`,
+              type: "admin_payment_verified",
+              relatedEntityId: order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                paymentId,
+                receiptId: receipt.id,
+                customerName: order.customerName,
+                provider: providerCode,
+                reference: canonicalBankRef,
+                amountETB: expectedTotalETB,
+              },
+              idempotencyKey: `admin-payment-verified:${paymentId}:${canonicalBankRef}`,
+            },
+            tx,
+          );
+
           return receipt;
         });
 
-        const customerId = order.userId;
-        if (customerId) {
-          await notificationService
-            .sendNotification({
-              userId: customerId,
-              title: `Payment Verified — Order #${order.orderNumber}`,
-              message: `Your payment of ${expectedTotalETB.toLocaleString()} ETB via ${providerLabel} (Ref: ${canonicalBankRef}) has been verified and your order is confirmed.`,
-              type: "success",
-            })
-            .catch(() => {});
-        }
+        void notificationService.flushOutbox();
 
         const verifiedReceiptDto = mapReceiptRecordToDto(
           verifiedReceipt,
@@ -2517,7 +2880,7 @@ export class PaymentVerificationService {
           size: number;
         }
       | undefined,
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" },
+    actor: PaymentActor,
   ): Promise<SubmitPaymentReceiptResponse> {
     const input = submitPaymentReceiptSchema.parse(rawInput);
 
@@ -2574,7 +2937,7 @@ export class PaymentVerificationService {
       });
     }
 
-    if (actor.role !== "ADMIN" && (!order.userId || order.userId !== actor.userId)) {
+    if (!canActorAccessOrder(order, actor)) {
       throw new AppError({
         message: "You do not have permission to submit a receipt for this order.",
         statusCode: HTTP_STATUS.FORBIDDEN,
@@ -2693,7 +3056,7 @@ export class PaymentVerificationService {
       payment = await prisma.payment.create({
         data: {
           orderId: order.id,
-          userId: order.userId ?? actor.userId,
+          userId: order.userId ?? actor.userId ?? null,
           provider: providerCode,
           paymentMethod: providerCode,
           transactionReference: suppliedRef || order.paymentReference || `REF-${order.orderNumber}`,
@@ -2706,9 +3069,10 @@ export class PaymentVerificationService {
       });
     }
 
+    const actorTag = (actor.userId ?? actor.guestSessionId ?? "guest").slice(0, 6);
     const uploaded = await cloudinaryService.uploadSingle(file.buffer, {
       folder: "addisgebeya/receipts",
-      filenamePrefix: `receipt_${order.orderNumber}_${actor.userId.slice(0, 6)}`,
+      filenamePrefix: `receipt_${order.orderNumber}_${actorTag}`,
       tags: ["addisgebeya", "payment-receipt", order.orderNumber],
       deliveryType: "authenticated",
       allowPdf: true,
@@ -2755,7 +3119,7 @@ export class PaymentVerificationService {
           data: {
             paymentId: payment.id,
             orderId: order.id,
-            userId: order.userId ?? actor.userId,
+            userId: order.userId ?? actor.userId ?? null,
             provider: providerCode,
             transactionReference: suppliedRef || null,
             extractedReference: ocrResult.extractedReference,
@@ -2820,18 +3184,111 @@ export class PaymentVerificationService {
           data: {
             paymentId: payment.id,
             orderId: order.id,
-            userId: actor.userId,
+            userId: actor.userId ?? null,
             provider: providerCode,
             submittedReference: suppliedRef || payment.transactionReference,
             verificationStatus: "ReceiptSubmitted",
             actorType: actor.role === "ADMIN" ? "admin" : "customer",
-            actorId: actor.userId,
+            actorId: actor.userId ?? null,
             reason: `Payment receipt submitted via ${input.captureMethod === "camera" ? "camera capture" : "file upload"} (${Math.round((uploaded.bytes || file.buffer.length) / 1024)} KB). OCR ref: ${ocrResult.extractedReference ?? "none"}.`,
           },
         });
 
+        const customerId = order.userId ?? actor.userId ?? null;
+        if (customerId) {
+          await notificationService.createNotification(
+            {
+              userId: customerId,
+              title: `Payment Receipt Submitted — #${order.orderNumber}`,
+              message: `Your ${providerLabel} receipt for order #${order.orderNumber} (${Number(order.totalETB).toLocaleString()} ETB) was uploaded successfully${input.autoVerify ? " and is being verified." : " and queued for administrator verification."}`,
+              type: "payment_receipt_submitted",
+              relatedEntityId: order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                paymentId: payment.id,
+                receiptId: receipt.id,
+                provider: providerCode,
+                reference: suppliedRef || null,
+              },
+              idempotencyKey: `payment-receipt-submitted:${receipt.id}`,
+            },
+            tx,
+          );
+
+          if (!input.autoVerify) {
+            await notificationService.createNotification(
+              {
+                userId: customerId,
+                title: `Manual Verification Pending — #${order.orderNumber}`,
+                message: `Your ${providerLabel} receipt for order #${order.orderNumber} is queued for manual administrator review.`,
+                type: "payment_manual_review",
+                relatedEntityId: order.orderNumber,
+                relatedEntityType: "payment",
+                metadata: {
+                  orderId: order.id,
+                  orderNumber: order.orderNumber,
+                  paymentId: payment.id,
+                  receiptId: receipt.id,
+                  provider: providerCode,
+                },
+                idempotencyKey: `payment-manual-review:${receipt.id}:submitted`,
+              },
+              tx,
+            );
+          }
+        }
+
+        await notificationService.notifyAdmins(
+          {
+            title: `Payment Receipt Submitted — #${order.orderNumber}`,
+            message: `${order.customerName} submitted a ${providerLabel} payment receipt (${input.captureMethod}) for order #${order.orderNumber}${suppliedRef ? ` (Ref: ${suppliedRef})` : ""}.`,
+            type: "admin_payment_receipt_submitted",
+            relatedEntityId: order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              paymentId: payment.id,
+              receiptId: receipt.id,
+              customerName: order.customerName,
+              provider: providerCode,
+              reference: suppliedRef || null,
+              captureMethod: input.captureMethod,
+              submittedAt: now.toISOString(),
+            },
+            idempotencyKey: `admin-receipt-submitted:${receipt.id}`,
+          },
+          tx,
+        );
+
+        if (!input.autoVerify) {
+          await notificationService.notifyAdmins(
+            {
+              title: `Manual Payment Review Needed — #${order.orderNumber}`,
+              message: `${order.customerName}'s ${providerLabel} receipt for order #${order.orderNumber} requires manual verification.`,
+              type: "admin_payment_manual_review",
+              relatedEntityId: order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                paymentId: payment.id,
+                receiptId: receipt.id,
+                customerName: order.customerName,
+                provider: providerCode,
+              },
+              idempotencyKey: `admin-payment-manual-review:${receipt.id}:submitted`,
+            },
+            tx,
+          );
+        }
+
         return receipt;
       });
+
+      void notificationService.flushOutbox();
     } catch (err) {
       await cloudinaryService
         .deleteImage(
@@ -2882,7 +3339,7 @@ export class PaymentVerificationService {
   async verifyReceiptById(
     receiptId: string,
     rawInput: unknown,
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" },
+    actor: PaymentActor,
   ): Promise<SubmitPaymentReceiptResponse> {
     const input = verifyReceiptByIdSchema.parse(rawInput ?? {});
 
@@ -2902,10 +3359,7 @@ export class PaymentVerificationService {
       });
     }
 
-    const isOwner =
-      receipt.userId === actor.userId ||
-      (receipt.order.userId && receipt.order.userId === actor.userId);
-    if (actor.role !== "ADMIN" && !isOwner) {
+    if (!canActorAccessOrder(receipt.order, actor, receipt.userId)) {
       throw new AppError({
         message: "You do not have permission to verify this receipt.",
         statusCode: HTTP_STATUS.FORBIDDEN,
@@ -3036,7 +3490,7 @@ export class PaymentVerificationService {
 
   async getOrderReceipts(
     orderIdOrNumber: string,
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" },
+    actor: PaymentActor,
   ): Promise<PaymentReceiptDto[]> {
     const normalized = orderIdOrNumber.replace(/^#/, "").trim();
     const order = await prisma.order.findFirst({
@@ -3058,7 +3512,7 @@ export class PaymentVerificationService {
       });
     }
 
-    if (actor.role !== "ADMIN" && (!order.userId || order.userId !== actor.userId)) {
+    if (!canActorAccessOrder(order, actor)) {
       throw new AppError({
         message: "You do not have permission to view receipts for this order.",
         statusCode: HTTP_STATUS.FORBIDDEN,
@@ -3071,13 +3525,13 @@ export class PaymentVerificationService {
 
   async createAuthorizedReceiptAccess(
     receiptId: string,
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" },
+    actor: PaymentActor,
   ): Promise<ReceiptAccessUrlResponse> {
     const receipt = await prisma.paymentReceipt.findUnique({
       where: { id: receiptId },
       include: {
         order: {
-          select: { userId: true, orderNumber: true },
+          select: { userId: true, guestSessionId: true, orderNumber: true },
         },
       },
     });
@@ -3090,11 +3544,7 @@ export class PaymentVerificationService {
       });
     }
 
-    const isOwner =
-      receipt.userId === actor.userId ||
-      (receipt.order.userId && receipt.order.userId === actor.userId);
-
-    if (actor.role !== "ADMIN" && !isOwner) {
+    if (!canActorAccessOrder(receipt.order, actor, receipt.userId)) {
       throw new AppError({
         message: "You do not have permission to access this receipt.",
         statusCode: HTTP_STATUS.FORBIDDEN,
@@ -3110,8 +3560,10 @@ export class PaymentVerificationService {
       });
     }
 
+    const tokenSubject =
+      actor.userId || (actor.guestSessionId ? `guest:${actor.guestSessionId}` : "guest");
     const token = signReceiptAccessToken(
-      { sub: actor.userId, role: actor.role, receiptId: receipt.id },
+      { sub: tokenSubject, role: actor.role, receiptId: receipt.id },
       "5m",
     );
     const ext =
@@ -3133,13 +3585,13 @@ export class PaymentVerificationService {
 
   async getAuthorizedReceiptFile(
     receiptId: string,
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" },
+    actor: PaymentActor,
   ): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
     const receipt = await prisma.paymentReceipt.findUnique({
       where: { id: receiptId },
       include: {
         order: {
-          select: { userId: true, orderNumber: true },
+          select: { userId: true, guestSessionId: true, orderNumber: true },
         },
       },
     });
@@ -3152,11 +3604,7 @@ export class PaymentVerificationService {
       });
     }
 
-    const isOwner =
-      receipt.userId === actor.userId ||
-      (receipt.order.userId && receipt.order.userId === actor.userId);
-
-    if (actor.role !== "ADMIN" && !isOwner) {
+    if (!canActorAccessOrder(receipt.order, actor, receipt.userId)) {
       throw new AppError({
         message: "You do not have permission to access this receipt image.",
         statusCode: HTTP_STATUS.FORBIDDEN,
@@ -3246,7 +3694,7 @@ export class PaymentVerificationService {
 
   async getPaymentStatus(
     orderIdOrNumber: string,
-    actor: { userId: string; role: "CUSTOMER" | "ADMIN" },
+    actor: PaymentActor,
   ): Promise<PaymentStatusResponse> {
     const normalized = orderIdOrNumber.replace(/^#/, "").trim();
     const order = await prisma.order.findFirst({
@@ -3269,7 +3717,7 @@ export class PaymentVerificationService {
       });
     }
 
-    if (actor.role !== "ADMIN" && (!order.userId || order.userId !== actor.userId)) {
+    if (!canActorAccessOrder(order, actor)) {
       throw new AppError({
         message: "You do not have permission to view payment status for this order.",
         statusCode: HTTP_STATUS.FORBIDDEN,
@@ -3754,18 +4202,72 @@ export class PaymentVerificationService {
             reason: payload.reason,
           },
         });
+
+        if (targetCustomerId) {
+          await notificationService.createNotification(
+            {
+              userId: targetCustomerId,
+              title: `Payment Approved — Order #${payment.order.orderNumber}`,
+              message: `Your payment of ${Number(payment.amount).toLocaleString()} ETB (Ref: ${resolvedRef}) has been approved by an administrator. Your order is now confirmed for dispatch.`,
+              type: "payment_approved",
+              relatedEntityId: payment.order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: payment.orderId,
+                orderNumber: payment.order.orderNumber,
+                paymentId: payment.id,
+                provider: providerCode,
+                reference: resolvedRef,
+                amountETB: Number(payment.amount),
+              },
+              idempotencyKey: `payment-approved:${payment.id}:${resolvedRef}`,
+            },
+            tx,
+          );
+
+          if (payment.order.status !== "Confirmed") {
+            await notificationService.createNotification(
+              {
+                userId: targetCustomerId,
+                title: `Order Confirmed — #${payment.order.orderNumber}`,
+                message: `Your order #${payment.order.orderNumber} is confirmed and queued for dispatch.`,
+                type: "order_confirmed",
+                relatedEntityId: payment.order.orderNumber,
+                relatedEntityType: "order",
+                metadata: {
+                  orderId: payment.orderId,
+                  orderNumber: payment.order.orderNumber,
+                },
+                idempotencyKey: `order-confirmed:${payment.orderId}`,
+              },
+              tx,
+            );
+          }
+        }
+
+        await notificationService.notifyAdmins(
+          {
+            title: `Payment Verified — Order #${payment.order.orderNumber}`,
+            message: `Payment for ${payment.order.customerName}'s order #${payment.order.orderNumber} (${Number(payment.amount).toLocaleString()} ETB, Ref: ${resolvedRef}) was manually approved.`,
+            type: "admin_payment_verified",
+            relatedEntityId: payment.order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: payment.orderId,
+              orderNumber: payment.order.orderNumber,
+              paymentId: payment.id,
+              customerName: payment.order.customerName,
+              provider: providerCode,
+              reference: resolvedRef,
+              amountETB: Number(payment.amount),
+            },
+            idempotencyKey: `admin-payment-verified:${payment.id}:${resolvedRef}`,
+          },
+          tx,
+        );
       });
 
-      if (targetCustomerId) {
-        await notificationService
-          .sendNotification({
-            userId: targetCustomerId,
-            title: `Payment Manually Approved — Order #${payment.order.orderNumber}`,
-            message: `Your payment of ${Number(payment.amount).toLocaleString()} ETB has been manually reviewed and confirmed by an administrator. Your order is now being prepared for dispatch.`,
-            type: "success",
-          })
-          .catch(() => {});
-      }
+      void notificationService.flushOutbox();
     } else {
       const isNewReceiptRequested =
         payload.decision === "request_new_receipt" || Boolean(payload.requestNewReceipt);
@@ -3831,21 +4333,157 @@ export class PaymentVerificationService {
             reason: payload.reason,
           },
         });
+
+        const rejectKeySuffix = `${payment.id}:${now.getTime()}`;
+
+        if (targetCustomerId) {
+          await notificationService.createNotification(
+            {
+              userId: targetCustomerId,
+              title: isNewReceiptRequested
+                ? `New Receipt Requested — Order #${payment.order.orderNumber}`
+                : `Payment Rejected — Order #${payment.order.orderNumber}`,
+              message: `Your payment for order #${payment.order.orderNumber} was rejected. Reason: ${payload.reason}. Please upload or capture a clear replacement receipt.`,
+              type: "payment_rejected",
+              relatedEntityId: payment.order.orderNumber,
+              relatedEntityType: "payment",
+              metadata: {
+                orderId: payment.orderId,
+                orderNumber: payment.order.orderNumber,
+                paymentId: payment.id,
+                provider: providerCode,
+                reason: payload.reason,
+                resubmissionRequested: isNewReceiptRequested,
+              },
+              idempotencyKey: `payment-rejected:${rejectKeySuffix}`,
+            },
+            tx,
+          );
+        }
+
+        await notificationService.notifyAdmins(
+          {
+            title: `Payment Rejected — Order #${payment.order.orderNumber}`,
+            message: `${payment.order.customerName}'s payment for order #${payment.order.orderNumber} was rejected. Reason: ${payload.reason}`,
+            type: "admin_payment_rejected",
+            relatedEntityId: payment.order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: payment.orderId,
+              orderNumber: payment.order.orderNumber,
+              paymentId: payment.id,
+              customerName: payment.order.customerName,
+              provider: providerCode,
+              reason: payload.reason,
+            },
+            idempotencyKey: `admin-payment-rejected:${rejectKeySuffix}`,
+          },
+          tx,
+        );
+      });
+
+      void notificationService.flushOutbox();
+    }
+
+    const result = await this.listAdminPayments({ search: payment.order.orderNumber, page: 1, limit: 1 });
+    return result.items.find((i) => i.id === payment.id)!;
+  }
+
+  async processRefund(
+    paymentId: string,
+    adminUserId: string,
+    rawPayload: unknown,
+  ): Promise<AdminPaymentRecordDto> {
+    const payload = adminRefundPaymentSchema.parse(rawPayload);
+
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { order: true },
+    });
+
+    if (!payment) {
+      throw new AppError({
+        message: "Payment record not found",
+        statusCode: HTTP_STATUS.NOT_FOUND,
+        code: "PAYMENT_NOT_FOUND",
+      });
+    }
+
+    const currentStatus = payment.paymentStatus.toLowerCase();
+    if (currentStatus !== "paid" && currentStatus !== "verified" && currentStatus !== "refundinitiated") {
+      throw new AppError({
+        message: "Only paid or refund-initiated payments can be refunded",
+        statusCode: HTTP_STATUS.BAD_REQUEST,
+        code: "PAYMENT_NOT_REFUNDABLE",
+      });
+    }
+
+    const isCompleted = payload.stage === "completed";
+    const nextPaymentStatus = isCompleted ? "Refunded" : "RefundInitiated";
+    const now = new Date();
+    const targetCustomerId = payment.userId ?? payment.order.userId;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          paymentStatus: nextPaymentStatus,
+          reviewedByAdminId: adminUserId,
+          reviewReason: payload.reason,
+          reviewedAt: now,
+        },
+      });
+
+      await tx.order.update({
+        where: { id: payment.orderId },
+        data: {
+          paymentStatus: nextPaymentStatus,
+          ...(isCompleted ? { status: "Cancelled" } : {}),
+        },
+      });
+
+      await tx.paymentVerificationLog.create({
+        data: {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          userId: payment.userId,
+          provider: payment.provider,
+          submittedReference: payment.transactionReference,
+          verificationStatus: nextPaymentStatus,
+          actorType: "admin",
+          actorId: adminUserId,
+          reason: payload.reason,
+        },
       });
 
       if (targetCustomerId) {
-        await notificationService
-          .sendNotification({
+        await notificationService.createNotification(
+          {
             userId: targetCustomerId,
-            title: isNewReceiptRequested
-              ? `New Receipt Requested — Order #${payment.order.orderNumber}`
-              : `Payment Receipt Rejected — Order #${payment.order.orderNumber}`,
-            message: `${payload.reason} Please upload or capture a clear replacement receipt from your order verification page.`,
-            type: "warning",
-          })
-          .catch(() => {});
+            title: isCompleted
+              ? `Refund Completed — Order #${payment.order.orderNumber}`
+              : `Refund Initiated — Order #${payment.order.orderNumber}`,
+            message: isCompleted
+              ? `Your refund of ${Number(payment.amount).toLocaleString()} ETB for order #${payment.order.orderNumber} has been completed. Note: ${payload.reason}`
+              : `A refund of ${Number(payment.amount).toLocaleString()} ETB for order #${payment.order.orderNumber} has been initiated. Note: ${payload.reason}`,
+            type: isCompleted ? "payment_refund_completed" : "payment_refund_initiated",
+            relatedEntityId: payment.order.orderNumber,
+            relatedEntityType: "payment",
+            metadata: {
+              orderId: payment.orderId,
+              orderNumber: payment.order.orderNumber,
+              paymentId: payment.id,
+              amountETB: Number(payment.amount),
+              reason: payload.reason,
+            },
+            idempotencyKey: `payment-refund:${payment.id}:${nextPaymentStatus}`,
+          },
+          tx,
+        );
       }
-    }
+    });
+
+    void notificationService.flushOutbox();
 
     const result = await this.listAdminPayments({ search: payment.order.orderNumber, page: 1, limit: 1 });
     return result.items.find((i) => i.id === payment.id)!;

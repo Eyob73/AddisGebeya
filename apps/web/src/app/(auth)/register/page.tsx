@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, Eye, EyeOff, Loader2, Lock, Mail, Phone, Ruler, User } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -257,6 +258,18 @@ function RegisterForm() {
             )}
           </Button>
         </form>
+
+        <div className="mt-5 space-y-4">
+          <div className="relative flex items-center py-1">
+            <div className="grow border-t border-border" />
+            <span className="mx-3 shrink-0 font-label text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
+              Or continue with
+            </span>
+            <div className="grow border-t border-border" />
+          </div>
+
+          <GoogleAuthButton intent="register" from={from} disabled={isSubmitting} />
+        </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
           Already have an account?{" "}

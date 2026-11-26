@@ -4,10 +4,16 @@ import { z } from "zod";
 const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(5000),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  FRONTEND_URL: z.string().url().default("http://localhost:3000"),
+  BACKEND_URL: z.string().url().optional().or(z.literal("")).default(""),
+  FRONTEND_URL: z.string().default("http://localhost:3000"),
   DATABASE_URL: z.string().optional().default(""),
   JWT_ACCESS_SECRET: z.string().min(16).optional(),
   JWT_REFRESH_SECRET: z.string().min(16).optional(),
+  GOOGLE_CLIENT_ID: z.string().optional().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
+  GOOGLE_CALLBACK_URL: z.string().url().optional().or(z.literal("")).default(""),
+  GOOGLE_OAUTH_REDIRECT_URL_DEV: z.string().url().optional().or(z.literal("")).default(""),
+  GOOGLE_OAUTH_REDIRECT_URL_PROD: z.string().url().optional().or(z.literal("")).default(""),
   CLOUDINARY_URL: z.string().optional().default(""),
   CLOUDINARY_CLOUD_NAME: z.string().optional().default(""),
   CLOUDINARY_API_KEY: z.string().optional().default(""),
@@ -34,15 +40,23 @@ if (data.NODE_ENV === "production") {
   }
 }
 
+const resolvedBackendUrl = (data.BACKEND_URL || `http://localhost:${data.PORT}`).replace(/\/+$/, "");
+
 export const env = Object.freeze({
   port: data.PORT,
   nodeEnv: data.NODE_ENV,
   isProduction: data.NODE_ENV === "production",
   isDevelopment: data.NODE_ENV === "development",
+  backendUrl: resolvedBackendUrl,
   frontendUrl: data.FRONTEND_URL,
   databaseUrl: data.DATABASE_URL,
   jwtAccessSecret: data.JWT_ACCESS_SECRET ?? "",
   jwtRefreshSecret: data.JWT_REFRESH_SECRET ?? "",
+  googleClientId: data.GOOGLE_CLIENT_ID.trim(),
+  googleClientSecret: data.GOOGLE_CLIENT_SECRET.trim(),
+  googleCallbackUrl: (data.GOOGLE_CALLBACK_URL || `${resolvedBackendUrl}/api/auth/google/callback`).trim(),
+  googleOAuthRedirectUrlDev: data.GOOGLE_OAUTH_REDIRECT_URL_DEV.trim(),
+  googleOAuthRedirectUrlProd: data.GOOGLE_OAUTH_REDIRECT_URL_PROD.trim(),
   cloudinaryUrl: data.CLOUDINARY_URL,
   cloudinaryCloudName: data.CLOUDINARY_CLOUD_NAME,
   cloudinaryApiKey: data.CLOUDINARY_API_KEY,

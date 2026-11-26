@@ -32,6 +32,29 @@ export const metadata: Metadata = {
   },
   description:
     "Ethiopia's premier single-vendor footwear destination. Authentic athletic, streetwear, running, and handcrafted leather shoes delivered across Addis Ababa and Ethiopia.",
+  icons: {
+    icon: [{ url: "/images/addisgebeya-logo.png", type: "image/png" }],
+    shortcut: "/images/addisgebeya-logo.png",
+    apple: "/images/addisgebeya-logo.png",
+  },
+  openGraph: {
+    title: "AddisGebeya Shoes — Step into Your Style",
+    description:
+      "Ethiopia's premier single-vendor footwear destination. Authentic athletic, streetwear, running, and handcrafted leather shoes delivered across Addis Ababa and Ethiopia.",
+    images: [
+      {
+        url: "/images/addisgebeya-logo.png",
+        width: 1536,
+        height: 1024,
+        alt: "AddisGebeya Shoes — Step into Your Style",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AddisGebeya Shoes — Step into Your Style",
+    images: ["/images/addisgebeya-logo.png"],
+  },
 };
 
 interface RootLayoutProps {
