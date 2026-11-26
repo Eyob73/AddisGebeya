@@ -231,15 +231,15 @@ export function SiteHeader() {
             <Link
               href="/cart"
               aria-label={`Shopping bag with ${totals.itemCount} items`}
-              className="flex items-center gap-2 rounded-full border border-border/80 bg-surface px-3 py-1.5 shadow-card transition-colors hover:border-primary hover:bg-primary-light/60"
+              className="flex min-w-11 shrink-0 items-center justify-center gap-2 rounded-full border border-border/80 bg-surface px-3 py-1.5 shadow-card transition-colors hover:border-primary hover:bg-primary-light/60 sm:min-w-36 sm:justify-start sm:px-3.5"
             >
-              <div className="relative">
+              <div className="relative shrink-0">
                 <ShoppingBag className="size-5 text-foreground" />
                 <span className="absolute -top-1.5 -right-2 flex size-4 items-center justify-center rounded-full bg-cta font-label text-[10px] font-bold text-cta-foreground leading-none">
                   {totals.itemCount}
                 </span>
               </div>
-              <div className="hidden flex-col pl-1 text-left sm:flex">
+              <div className="hidden flex-col pl-1 text-left whitespace-nowrap sm:flex">
                 <span className="font-label text-[10px] font-semibold leading-none text-muted-foreground">
                   {totals.itemCount} {totals.itemCount === 1 ? "item" : "items"}
                 </span>
