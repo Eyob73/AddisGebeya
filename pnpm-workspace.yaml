@@ -11,4 +11,5 @@ allowBuilds:
   sharp: true
   tesseract.js: true
   unrs-resolver: true
+  workerd: true
   "@scarf/scarf": false

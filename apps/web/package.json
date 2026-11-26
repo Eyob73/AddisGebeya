@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
+    "build:cf": "opennextjs-cloudflare build",
+    "preview:cf": "opennextjs-cloudflare preview",
     "start": "next start --port 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -14,6 +16,7 @@
     "@addisgebeya/types": "workspace:*",
     "@addisgebeya/validation": "workspace:*",
     "@hookform/resolvers": "^5.0.1",
+    "@opennextjs/cloudflare": "^1.20.18",
     "@radix-ui/react-slot": "^1.2.3",
     "@tanstack/react-query": "^5.90.0",
     "class-variance-authority": "^0.7.1",
@@ -38,6 +41,7 @@
     "eslint-config-next": "^16.4.6",
     "tailwindcss": "^4.1.11",
     "tw-animate-css": "^1.3.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.168.0"
   }
 }

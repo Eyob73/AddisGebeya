@@ -16,6 +16,8 @@ apps/web/.env.local
 dist/
 build/
 .next/
+.open-next/
+.wrangler/
 out/
 *.tsbuildinfo
 
