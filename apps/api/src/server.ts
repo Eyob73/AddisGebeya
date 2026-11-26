@@ -20,8 +20,8 @@ async function bootstrap(): Promise<void> {
     dbCheck.latencyMs !== undefined ? { latencyMs: dbCheck.latencyMs } : undefined,
   );
 
-  server = httpServer.listen(env.port, () => {
-    logger.info(`${APP_NAME} API running on http://localhost:${env.port}${API_PREFIX}`, {
+  server = httpServer.listen(env.port, "0.0.0.0", () => {
+    logger.info(`${APP_NAME} API running on http://0.0.0.0:${env.port}${API_PREFIX}`, {
       environment: env.nodeEnv,
       frontendUrl: env.frontendUrl,
       realtime: "Socket.IO enabled",
