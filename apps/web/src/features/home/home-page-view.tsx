@@ -47,8 +47,18 @@ import { useAuthStore } from "@/stores/auth.store";
 import { useCatalogStore } from "@/stores/catalog.store";
 import { useUiStore } from "@/stores/ui.store";
 import { formatETB } from "@/utils/format";
+import type { ShoeProduct } from "@/types/store.types";
 import { cn } from "@/lib/utils";
 import { DEFAULT_FALLBACK_IMAGE, getCardImageUrl } from "@/utils/cloudinary";
+
+/** Returns the best available catalog image URL for a product. */
+function getPrimaryProductImage(product: ShoeProduct): string {
+  const primaryImage =
+    product.productImages?.find((img) => img.isPrimary)?.imageUrl ||
+    product.productImages?.[0]?.imageUrl;
+  const colorwayImage = product.colorways[0]?.images[0];
+  return primaryImage?.trim() || colorwayImage?.trim() || "";
+}
 
 const TRENDING_TABS = [
   { id: "all", label: "All Releases" },
@@ -80,7 +90,10 @@ export function HomePageView() {
   const [isHeroEditOpen, setIsHeroEditOpen] = React.useState(false);
   const [isUploadingHeroImage, setIsUploadingHeroImage] = React.useState(false);
   const [isSavingHero, setIsSavingHero] = React.useState(false);
+  const [hasCustomHeroImage, setHasCustomHeroImage] = React.useState(false);
+  const [isCustomHeroLink, setIsCustomHeroLink] = React.useState(false);
   const heroFileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const heroHrefInputRef = React.useRef<HTMLInputElement | null>(null);
   const [heroForm, setHeroForm] = React.useState({
     heroImageUrl: "",
     heroBadgeText: "",
@@ -95,8 +108,54 @@ export function HomePageView() {
   const { data: realReviews = [] } = useAllReviewsQuery();
   const addToast = useUiStore((s) => s.addToast);
 
+  const linkableProducts = React.useMemo(
+    () =>
+      [...allProducts]
+        .filter((product) => product.status === "active")
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [allProducts],
+  );
+
+  const selectedHeroProduct = React.useMemo(() => {
+    const normalizedHref = heroForm.heroCardHref.trim().replace(/\/+$/, "");
+    if (!normalizedHref) return undefined;
+    return linkableProducts.find(
+      (product) => `/products/${product.slug}` === normalizedHref,
+    );
+  }, [heroForm.heroCardHref, linkableProducts]);
+
+  const selectedHeroProductImage = React.useMemo(
+    () => (selectedHeroProduct ? getPrimaryProductImage(selectedHeroProduct) : ""),
+    [selectedHeroProduct],
+  );
+
+  const handleSelectHeroProduct = (productId: string) => {
+    if (!productId) {
+      setIsCustomHeroLink(true);
+      window.setTimeout(() => heroHrefInputRef.current?.focus(), 0);
+      return;
+    }
+    const product = linkableProducts.find((item) => item.id === productId);
+    if (!product) return;
+
+    setIsCustomHeroLink(false);
+    const productImage = getPrimaryProductImage(product);
+    setHeroForm((prev) => ({
+      ...prev,
+      heroCardHref: `/products/${product.slug}`,
+      heroCardTitle: product.name,
+      heroCardPriceText: formatETB(product.priceETB),
+      heroCardSubtitle:
+        product.brand?.trim() || product.categoryName?.trim() || prev.heroCardSubtitle,
+      heroImageUrl:
+        !hasCustomHeroImage && productImage ? productImage : prev.heroImageUrl,
+    }));
+  };
+
   const openHeroEditor = () => {
     if (!isAdmin) return;
+    setHasCustomHeroImage(false);
+    setIsCustomHeroLink(false);
     setHeroForm({
       heroImageUrl,
       heroBadgeText,
@@ -136,6 +195,7 @@ export function HomePageView() {
     setIsUploadingHeroImage(true);
     try {
       const { url } = await storeService.uploadHeroImage(file);
+      setHasCustomHeroImage(true);
       setHeroForm((f) => ({ ...f, heroImageUrl: url }));
       addToast({
         title: "Hero Image Uploaded",
@@ -336,19 +396,25 @@ export function HomePageView() {
                 <div className="pointer-events-none absolute -bottom-10 -left-10 size-64 rounded-full bg-cta/15 blur-2xl" />
 
                 <div className="relative flex h-[380px] sm:h-[430px] w-full items-center justify-center overflow-hidden rounded-xl bg-surface-container">
-                  {heroImageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={heroImageUrl}
-                      alt={heroCardTitle}
-                      className="size-full object-cover transition-transform duration-700 group-hover:scale-105"
-                    />
-                  ) : (
-                    <div
-                      aria-hidden="true"
-                      className="size-full bg-gradient-to-br from-surface-container via-surface-low to-primary/10"
-                    />
-                  )}
+                  <Link
+                    href={heroCardHref}
+                    aria-label={`View ${heroCardTitle}`}
+                    className="block size-full"
+                  >
+                    {heroImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={heroImageUrl}
+                        alt={heroCardTitle}
+                        className="size-full object-cover transition-transform duration-700 group-hover:scale-105"
+                      />
+                    ) : (
+                      <div
+                        aria-hidden="true"
+                        className="size-full bg-gradient-to-br from-surface-container via-surface-low to-primary/10"
+                      />
+                    )}
+                  </Link>
 
                   {/* Floating Interactive Price Pill */}
                   <Link
@@ -375,7 +441,7 @@ export function HomePageView() {
                 </div>
 
                 {/* Top Floating Row: Admin-Only Edit Button + Stock Badge */}
-                <div className="pointer-events-none absolute top-7 right-7 left-7 flex items-center justify-between gap-2">
+                <div className="pointer-events-none absolute top-7 right-7 left-7 z-10 flex items-center justify-between gap-2">
                   {isAdmin ? (
                     <Button
                       type="button"
@@ -908,6 +974,37 @@ export function HomePageView() {
           className="max-w-xl"
         >
           <form onSubmit={handleHeroSave} className="space-y-4 text-xs">
+            <div className="space-y-1.5">
+              <label
+                htmlFor="hero-product-select"
+                className="block font-semibold text-foreground"
+              >
+                Link to Product
+              </label>
+              <select
+                id="hero-product-select"
+                value={isCustomHeroLink ? "" : (selectedHeroProduct?.id ?? "")}
+                disabled={isSavingHero}
+                onChange={(e) => handleSelectHeroProduct(e.target.value)}
+                className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground outline-none transition-colors focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">
+                  {isProductsLoading
+                    ? "Loading products..."
+                    : "Custom path (enter link manually below)"}
+                </option>
+                {linkableProducts.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name} — {formatETB(product.priceETB)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                Choosing a product updates the destination link, card text, and image (unless you
+                upload or enter a custom image).
+              </p>
+            </div>
+
             <div className="space-y-2">
               <label className="block font-semibold text-foreground">
                 Right-Side Hero Image Preview
@@ -948,15 +1045,32 @@ export function HomePageView() {
                   )}
                   <span>{isUploadingHeroImage ? "Uploading..." : "Upload New Image"}</span>
                 </Button>
+                {selectedHeroProduct &&
+                selectedHeroProductImage &&
+                heroForm.heroImageUrl.trim() !== selectedHeroProductImage ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isUploadingHeroImage || isSavingHero}
+                    onClick={() => {
+                      setHasCustomHeroImage(false);
+                      setHeroForm((f) => ({ ...f, heroImageUrl: selectedHeroProductImage }));
+                    }}
+                  >
+                    <span>Use Product Image</span>
+                  </Button>
+                ) : null}
                 {heroForm.heroImageUrl.trim() ? (
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     disabled={isUploadingHeroImage || isSavingHero}
-                    onClick={() =>
-                      setHeroForm((f) => ({ ...f, heroImageUrl: "" }))
-                    }
+                    onClick={() => {
+                      setHasCustomHeroImage(true);
+                      setHeroForm((f) => ({ ...f, heroImageUrl: "" }));
+                    }}
                   >
                     <XCircle className="size-3.5" />
                     <span>Clear Image</span>
@@ -969,9 +1083,10 @@ export function HomePageView() {
               <label className="block font-semibold text-foreground">Image URL</label>
               <Input
                 value={heroForm.heroImageUrl}
-                onChange={(e) =>
-                  setHeroForm((f) => ({ ...f, heroImageUrl: e.target.value }))
-                }
+                onChange={(e) => {
+                  setHasCustomHeroImage(true);
+                  setHeroForm((f) => ({ ...f, heroImageUrl: e.target.value }));
+                }}
                 placeholder="https://... or /images/..."
               />
             </div>
@@ -1032,14 +1147,20 @@ export function HomePageView() {
             </div>
 
             <div className="space-y-1">
-              <label className="block font-semibold text-foreground">
+              <label
+                htmlFor="hero-card-href-input"
+                className="block font-semibold text-foreground"
+              >
                 Featured Card Link Path *
               </label>
               <Input
+                ref={heroHrefInputRef}
+                id="hero-card-href-input"
                 value={heroForm.heroCardHref}
-                onChange={(e) =>
-                  setHeroForm((f) => ({ ...f, heroCardHref: e.target.value }))
-                }
+                onChange={(e) => {
+                  setIsCustomHeroLink(false);
+                  setHeroForm((f) => ({ ...f, heroCardHref: e.target.value }));
+                }}
                 placeholder="/products/addis-velocity-pro-nitro"
                 required
               />
