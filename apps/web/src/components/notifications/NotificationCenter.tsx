@@ -23,6 +23,8 @@ import { useAuthStore } from "@/stores/auth.store";
 import { useUiStore } from "@/stores/ui.store";
 import { cn } from "@/lib/utils";
 import { NotificationItem } from "./NotificationItem";
+import { PushNotificationSettingsCard } from "./PushNotificationSettingsCard";
+import { PushPermissionPrompt } from "./PushPermissionPrompt";
 
 const READ_FILTER_TABS: Array<{ id: "all" | "false" | "true"; label: string }> = [
   { id: "all", label: "All Notifications" },
@@ -202,6 +204,9 @@ export function NotificationCenter() {
         </div>
       </div>
 
+      {/* Contextual Device Push Permission Banner */}
+      <PushPermissionPrompt context={user?.role === "admin" ? "admin" : "notifications"} />
+
       {/* Filter Controls */}
       <div className="space-y-3 rounded-2xl border border-border bg-surface p-4 shadow-card">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
@@ -340,6 +345,9 @@ export function NotificationCenter() {
           </div>
         </div>
       ) : null}
+
+      {/* Device Push Notification Status & Controls */}
+      <PushNotificationSettingsCard />
     </div>
   );
 }

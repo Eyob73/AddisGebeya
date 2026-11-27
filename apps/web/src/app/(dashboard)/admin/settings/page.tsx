@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Save, Store, Truck, Wallet } from "lucide-react";
+import { PushNotificationSettingsCard } from "@/components/notifications/PushNotificationSettingsCard";
 import { ApiStatusCard } from "@/components/shared/api-status-card";
 import { AdminSettingsSkeleton } from "@/components/shared/page-skeletons";
 import { Button } from "@/components/ui/button";
@@ -241,6 +242,9 @@ export default function AdminSettingsPage() {
           </div>
         </section>
       </form>
+
+      {/* Device Push Notifications for Store Admin */}
+      <PushNotificationSettingsCard />
 
       {/* Preserved Backend Health Integration Status */}
       <section className="space-y-2">

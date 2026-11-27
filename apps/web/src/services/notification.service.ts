@@ -4,11 +4,19 @@ import type {
   MarkNotificationReadResponse,
   NotificationDto,
   PaginatedNotificationsResponse,
+  PushSubscribeResponse,
+  PushSubscriptionStatusResponse,
+  PushUnsubscribeResponse,
   UnreadNotificationCountResponse,
 } from "@addisgebeya/types";
 import {
   notificationIdParamSchema,
   notificationListQuerySchema,
+  subscribePushNotificationSchema,
+  unsubscribePushNotificationSchema,
+  updatePushPreferencesSchema,
+  type SubscribePushNotificationInput,
+  type UnsubscribePushNotificationInput,
 } from "@addisgebeya/validation";
 import { apiClient } from "@/lib/api-client";
 
@@ -67,6 +75,41 @@ export const notificationService = {
     broadcast?: boolean;
   }): Promise<NotificationDto | { count: number }> {
     return apiClient.post("/notifications", payload);
+  },
+
+  async getPushStatus(endpoint?: string): Promise<PushSubscriptionStatusResponse> {
+    return apiClient.get<PushSubscriptionStatusResponse>("/notifications/push/status", {
+      params: endpoint ? { endpoint } : undefined,
+    });
+  },
+
+  async subscribePush(
+    payload: SubscribePushNotificationInput,
+  ): Promise<PushSubscribeResponse> {
+    const validated = subscribePushNotificationSchema.parse(payload);
+    return apiClient.post<PushSubscribeResponse>("/notifications/push/subscribe", validated);
+  },
+
+  async unsubscribePush(
+    payload: UnsubscribePushNotificationInput = {},
+  ): Promise<PushUnsubscribeResponse> {
+    const validated = unsubscribePushNotificationSchema.parse(payload);
+    return apiClient.post<PushUnsubscribeResponse>("/notifications/push/unsubscribe", validated);
+  },
+
+  async updatePushPreferences(pushEnabled: boolean): Promise<PushSubscriptionStatusResponse> {
+    const validated = updatePushPreferencesSchema.parse({ pushEnabled });
+    return apiClient.patch<PushSubscriptionStatusResponse>(
+      "/notifications/push/preferences",
+      validated,
+    );
+  },
+
+  async sendTestPush(): Promise<{
+    notification: NotificationDto;
+    push: { sent: number; failed: number; removed: number };
+  }> {
+    return apiClient.post("/notifications/push/test", {});
   },
 };
 

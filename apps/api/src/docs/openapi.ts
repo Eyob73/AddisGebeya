@@ -493,6 +493,56 @@ export const openApiSpec = {
         },
       },
     },
+    "/notifications/push/status": {
+      get: {
+        summary: "Get Web Push configuration, VAPID public key, and registered devices for current user",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Device push notification status" },
+        },
+      },
+    },
+    "/notifications/push/subscribe": {
+      post: {
+        summary: "Register or update a browser Web Push subscription for current user",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "201": { description: "Push subscription registered" },
+        },
+      },
+    },
+    "/notifications/push/unsubscribe": {
+      post: {
+        summary: "Remove a registered device push subscription for current user",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Push subscription removed" },
+        },
+      },
+    },
+    "/notifications/push/preferences": {
+      patch: {
+        summary: "Enable or pause device push notifications for current user",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Push preferences updated" },
+        },
+      },
+    },
+    "/notifications/push/test": {
+      post: {
+        summary: "Send a test device push notification to current user's registered devices",
+        tags: ["Notifications"],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "201": { description: "Test push notification dispatched" },
+        },
+      },
+    },
   },
 };
 

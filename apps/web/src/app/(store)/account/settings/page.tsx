@@ -21,6 +21,7 @@ import {
   UserX,
 } from "lucide-react";
 import { AccountShell } from "@/components/layout/account-shell";
+import { PushNotificationSettingsCard } from "@/components/notifications/PushNotificationSettingsCard";
 import { AccountPageSkeleton } from "@/components/shared/page-skeletons";
 import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Badge } from "@/components/ui/badge";
@@ -175,6 +176,9 @@ export default function AccountSettingsPage() {
             </div>
           </div>
         </section>
+
+        {/* Device Push Notifications */}
+        <PushNotificationSettingsCard />
 
         {/* Active Sessions & Device Management */}
         <section className="rounded-2xl border border-border bg-surface p-6 shadow-card sm:p-8">

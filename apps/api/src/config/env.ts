@@ -20,6 +20,9 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().optional().default(""),
   CHEKI_API_BASE_URL: z.string().url().default("https://cheki.et"),
   CHEKI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(65000),
+  VAPID_PUBLIC_KEY: z.string().optional().default(""),
+  VAPID_PRIVATE_KEY: z.string().optional().default(""),
+  VAPID_SUBJECT: z.string().optional().default("mailto:support@addisgebeyashoes.et"),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -63,6 +66,9 @@ export const env = Object.freeze({
   cloudinaryApiSecret: data.CLOUDINARY_API_SECRET,
   chekiApiBaseUrl: data.CHEKI_API_BASE_URL.replace(/\/+$/, ""),
   chekiTimeoutMs: data.CHEKI_TIMEOUT_MS,
+  vapidPublicKey: data.VAPID_PUBLIC_KEY.trim(),
+  vapidPrivateKey: data.VAPID_PRIVATE_KEY.trim(),
+  vapidSubject: (data.VAPID_SUBJECT || "mailto:support@addisgebeyashoes.et").trim(),
 });
 
 export type AppEnv = typeof env;

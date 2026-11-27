@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, Circle, MapPin, Phone, Search, ShieldCheck, Truck } from "lucide-react";
 import { AccountShell } from "@/components/layout/account-shell";
+import { PushPermissionPrompt } from "@/components/notifications/PushPermissionPrompt";
 import { OrderTrackingPageSkeleton } from "@/components/shared/page-skeletons";
 import { useIsMounted } from "@/hooks/use-is-mounted";
 import { Badge } from "@/components/ui/badge";
@@ -119,6 +120,8 @@ function OrderTrackingInner() {
             ))}
           </div>
         </div>
+
+        <PushPermissionPrompt context="tracking" />
 
         {!activeOrder ? (
           <div className="rounded-2xl border border-border bg-surface p-10 text-center">

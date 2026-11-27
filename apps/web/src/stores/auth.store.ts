@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-client";
 import { useCartStore } from "@/stores/cart.store";
 import { useNotificationStore } from "@/stores/notification.store";
+import { cleanupDevicePushOnLogout, usePushStore } from "@/stores/push.store";
 import { useWishlistStore } from "@/stores/wishlist.store";
 import type { AuthUser } from "@/types/store.types";
 
@@ -173,6 +174,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       }
 
       set({ user: res.user, isAuthenticated: true, isLoading: false, isInitialized: true });
+      void usePushStore.getState().ensureDefaultPushEnabled(res.user.id);
       useWishlistStore.getState().syncFromBackend().catch(() => {});
       await useCartStore.getState().mergeWithBackend().catch(() => ({ warnings: [], mergedCount: 0 }));
       return res.user;
@@ -203,6 +205,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       }
 
       set({ user: res.user, isAuthenticated: true, isLoading: false, isInitialized: true });
+      void usePushStore.getState().ensureDefaultPushEnabled(res.user.id);
       useWishlistStore.getState().syncFromBackend().catch(() => {});
       await useCartStore.getState().mergeWithBackend().catch(() => ({ warnings: [], mergedCount: 0 }));
       return res.user;
@@ -231,6 +234,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         isLoading: false,
         isInitialized: true,
       });
+      void usePushStore.getState().ensureDefaultPushEnabled(authUser.id);
       lastCompletedCookieAuthAt = Date.now();
       useWishlistStore.getState().syncFromBackend().catch(() => {});
       await useCartStore.getState().mergeWithBackend().catch(() => ({ warnings: [], mergedCount: 0 }));
@@ -256,12 +260,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ isLoading: true });
     lastCompletedCookieAuthAt = 0;
     try {
+      await cleanupDevicePushOnLogout();
       await apiClient.post("/auth/logout").catch(() => {});
     } finally {
       clearStoredTokens();
       useWishlistStore.getState().clear();
       useCartStore.getState().clearCart();
       useNotificationStore.getState().reset();
+      usePushStore.getState().reset();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
@@ -309,12 +315,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ isLoading: true });
     lastCompletedCookieAuthAt = 0;
     try {
+      await cleanupDevicePushOnLogout({ allDevices: true });
       await apiClient.post("/auth/logout-all").catch(() => {});
     } finally {
       clearStoredTokens();
       useWishlistStore.getState().clear();
       useCartStore.getState().clearCart();
       useNotificationStore.getState().reset();
+      usePushStore.getState().reset();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
@@ -323,12 +331,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ isLoading: true });
     lastCompletedCookieAuthAt = 0;
     try {
+      await cleanupDevicePushOnLogout({ allDevices: true });
       await apiClient.post("/auth/deactivate", { passwordConfirm });
     } finally {
       clearStoredTokens();
       useWishlistStore.getState().clear();
       useCartStore.getState().clearCart();
       useNotificationStore.getState().reset();
+      usePushStore.getState().reset();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
@@ -371,6 +381,8 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 // Wire silent unauthorized callback
 onUnauthorized(() => {
   lastCompletedCookieAuthAt = 0;
+  void cleanupDevicePushOnLogout({ localOnly: true });
   useNotificationStore.getState().reset();
+  usePushStore.getState().reset();
   useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
 });

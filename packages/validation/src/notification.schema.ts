@@ -44,3 +44,52 @@ export const adminDispatchNotificationSchema = z
 
 export type AdminDispatchNotificationInput = z.infer<typeof adminDispatchNotificationSchema>;
 
+export const pushSubscriptionKeysSchema = z.object({
+  p256dh: z
+    .string()
+    .trim()
+    .min(16, "Invalid push encryption public key")
+    .max(512, "Push public key is too long"),
+  auth: z
+    .string()
+    .trim()
+    .min(8, "Invalid push authentication secret")
+    .max(256, "Push auth secret is too long"),
+});
+
+export const subscribePushNotificationSchema = z.object({
+  endpoint: z
+    .string()
+    .trim()
+    .url("Valid push endpoint URL is required")
+    .max(2048, "Push endpoint URL is too long")
+    .refine((val) => /^https:\/\//i.test(val), {
+      message: "Push subscription endpoint must use HTTPS",
+    }),
+  keys: pushSubscriptionKeysSchema,
+  userAgent: z.string().trim().max(512).optional(),
+});
+
+export const unsubscribePushNotificationSchema = z.object({
+  endpoint: z
+    .string()
+    .trim()
+    .url("Valid push endpoint URL is required")
+    .max(2048)
+    .optional(),
+  all: z.boolean().optional().default(false),
+});
+
+export const pushStatusQuerySchema = z.object({
+  endpoint: z.string().trim().url().max(2048).optional(),
+});
+
+export const updatePushPreferencesSchema = z.object({
+  pushEnabled: z.boolean(),
+});
+
+export type SubscribePushNotificationInput = z.infer<typeof subscribePushNotificationSchema>;
+export type UnsubscribePushNotificationInput = z.input<typeof unsubscribePushNotificationSchema>;
+export type PushStatusQuery = z.infer<typeof pushStatusQuerySchema>;
+export type UpdatePushPreferencesInput = z.infer<typeof updatePushPreferencesSchema>;
+

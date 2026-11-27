@@ -20,6 +20,7 @@
     "test:payments": "tsx test-cheki-payment-e2e.ts",
     "test:receipts": "tsx test-receipt-upload-e2e.ts",
     "test:notifications": "tsx test-notifications-e2e.ts",
+    "test:push": "tsx test-push-notifications-e2e.ts",
     "test:oauth": "tsx test-google-oauth-e2e.ts",
     "test:checkout": "tsx test-checkout-auth-e2e.ts"
   },
@@ -47,6 +48,7 @@
     "socket.io": "^4.8.4",
     "swagger-ui-express": "^5.0.1",
     "tesseract.js": "^7.0.0",
+    "web-push": "^4.0.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -63,6 +65,7 @@
     "@types/passport": "^1.0.17",
     "@types/passport-google-oauth20": "^2.0.17",
     "@types/swagger-ui-express": "^4.1.8",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9.39.0",
     "prisma": "^6.19.3",
     "socket.io-client": "^4.8.4",

@@ -19,6 +19,7 @@ import {
 } from "../../socket/socket.events.js";
 import { AppError } from "../../utils/app-error.js";
 import { logger } from "../../utils/logger.js";
+import { pushNotificationService } from "./push.service.js";
 
 export type DbClient = Prisma.TransactionClient | typeof prisma;
 
@@ -289,7 +290,7 @@ export class NotificationService {
   }
 
   async flushOutbox(limit = 50): Promise<{ processed: number; failed: number }> {
-    if (!getActiveSocketServer()) {
+    if (!getActiveSocketServer() && !pushNotificationService.isConfigured()) {
       return { processed: 0, failed: 0 };
     }
 
@@ -306,17 +307,16 @@ export class NotificationService {
 
   private async executeOutboxFlush(limit: number): Promise<{ processed: number; failed: number }> {
     const io = getActiveSocketServer();
-    if (!io) {
+    const pushReady = pushNotificationService.isConfigured();
+    if (!io && !pushReady) {
       return { processed: 0, failed: 0 };
     }
 
     const now = new Date();
     const staleProcessingCutoff = new Date(now.getTime() - 60_000);
 
-    const candidates = await prisma.notificationOutbox.findMany({
-      where: {
-        attempts: { lt: MAX_OUTBOX_ATTEMPTS },
-        OR: [
+    const baseConditions: Prisma.NotificationOutboxWhereInput[] = io
+      ? [
           {
             status: { in: ["pending", "failed"] },
             nextRetryAt: { lte: now },
@@ -325,12 +325,34 @@ export class NotificationService {
             status: "processing",
             updatedAt: { lt: staleProcessingCutoff },
           },
-        ],
+        ]
+      : pushReady
+        ? [
+            {
+              status: { in: ["pending", "failed"] },
+              pushDispatchedAt: null,
+              nextRetryAt: { lte: now },
+            },
+          ]
+        : [];
+
+    const candidates = await prisma.notificationOutbox.findMany({
+      where: {
+        attempts: { lt: MAX_OUTBOX_ATTEMPTS },
+        OR: baseConditions,
       },
       include: {
-        notification: true,
+        notification: {
+          include: {
+            user: {
+              select: {
+                role: true,
+              },
+            },
+          },
+        },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
       take: limit,
     });
 
@@ -338,13 +360,16 @@ export class NotificationService {
       return { processed: 0, failed: 0 };
     }
 
+    // Deliver oldest-first within this batch while never letting stale backlog starve live alerts
+    candidates.reverse();
+
     const unreadCache = new Map<string, number>();
     const adminPulseSent = new Set<string>();
     let processed = 0;
     let failed = 0;
 
     for (const entry of candidates) {
-      // Atomic claim to prevent duplicate delivery across concurrent workers/calls
+      // Atomic claim prevents duplicate delivery across concurrent workers/calls
       const claimed = await prisma.notificationOutbox.updateMany({
         where: {
           id: entry.id,
@@ -370,37 +395,70 @@ export class NotificationService {
           unreadCache.set(dto.userId, unreadCount);
         }
 
-        const delivered = emitToUserRoom(dto.userId, SOCKET_EVENTS.NOTIFICATION_NEW, {
-          notification: dto,
-          unreadCount,
-        });
-
-        if (!delivered) {
-          throw new Error("Socket.IO server unavailable during outbox dispatch");
+        // Dispatch device Web Push at most once per outbox item (never blocks socket delivery)
+        let pushDispatchedAt = entry.pushDispatchedAt;
+        if (pushReady && !pushDispatchedAt) {
+          await pushNotificationService.sendNotificationToUser(
+            dto,
+            entry.notification.user.role,
+            unreadCount,
+          );
+          pushDispatchedAt = new Date();
+          await prisma.notificationOutbox.update({
+            where: { id: entry.id },
+            data: { pushDispatchedAt },
+          });
         }
 
-        if (dto.type.startsWith("admin_") && dto.relatedEntityId) {
-          const pulseKey = `${dto.type}:${dto.relatedEntityType ?? "system"}:${dto.relatedEntityId}`;
-          if (!adminPulseSent.has(pulseKey)) {
-            adminPulseSent.add(pulseKey);
-            emitToAdminRoom(SOCKET_EVENTS.ADMIN_ACTIVITY, {
-              type: dto.type,
-              entityType: dto.relatedEntityType ?? "system",
-              entityId: dto.relatedEntityId,
-              timestamp: dto.createdAt,
-            });
+        if (!io) {
+          await prisma.notificationOutbox.update({
+            where: { id: entry.id },
+            data: {
+              status: entry.status === "failed" ? "failed" : "pending",
+              ...(pushDispatchedAt ? { pushDispatchedAt } : {}),
+            },
+          });
+          if (pushDispatchedAt) {
+            processed += 1;
           }
+          continue;
         }
 
-        await prisma.notificationOutbox.update({
-          where: { id: entry.id },
-          data: {
-            status: "dispatched",
-            dispatchedAt: new Date(),
-            attempts: { increment: 1 },
-            lastError: null,
-          },
-        });
+        if (entry.status !== "dispatched") {
+          const delivered = emitToUserRoom(dto.userId, SOCKET_EVENTS.NOTIFICATION_NEW, {
+            notification: dto,
+            unreadCount,
+          });
+
+          if (!delivered) {
+            throw new Error("Socket.IO server unavailable during outbox dispatch");
+          }
+
+          if (dto.type.startsWith("admin_") && dto.relatedEntityId) {
+            const pulseKey = `${dto.type}:${dto.relatedEntityType ?? "system"}:${dto.relatedEntityId}`;
+            if (!adminPulseSent.has(pulseKey)) {
+              adminPulseSent.add(pulseKey);
+              emitToAdminRoom(SOCKET_EVENTS.ADMIN_ACTIVITY, {
+                type: dto.type,
+                entityType: dto.relatedEntityType ?? "system",
+                entityId: dto.relatedEntityId,
+                timestamp: dto.createdAt,
+              });
+            }
+          }
+
+          await prisma.notificationOutbox.update({
+            where: { id: entry.id },
+            data: {
+              status: "dispatched",
+              dispatchedAt: new Date(),
+              ...(pushDispatchedAt ? { pushDispatchedAt } : {}),
+              attempts: { increment: 1 },
+              lastError: null,
+            },
+          });
+        }
+
         processed += 1;
       } catch (err) {
         const nextAttempts = entry.attempts + 1;
@@ -660,6 +718,67 @@ export class NotificationService {
     );
 
     return { count: created.length };
+  }
+
+  async sendTestPushNotification(userId: string): Promise<{
+    notification: NotificationDto;
+    push: { sent: number; failed: number; removed: number };
+  }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+    if (!user) {
+      throw new AppError({
+        message: "Authenticated user not found",
+        statusCode: HTTP_STATUS.NOT_FOUND,
+        code: "NOT_FOUND",
+      });
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const notif = await tx.notification.create({
+        data: {
+          userId,
+          title: "AddisGebeya Device Alert Test",
+          message: "Your browser is connected and ready for real-time AddisGebeya order updates.",
+          type: "info",
+          relatedEntityType: "system",
+        },
+      });
+      const dto = mapNotificationToDto(notif);
+      const outbox = await tx.notificationOutbox.create({
+        data: {
+          notificationId: notif.id,
+          userId,
+          eventName: SOCKET_EVENTS.NOTIFICATION_NEW,
+          payload: dto as unknown as Prisma.InputJsonValue,
+          status: getActiveSocketServer() ? "dispatched" : "pending",
+          dispatchedAt: getActiveSocketServer() ? new Date() : null,
+          pushDispatchedAt: new Date(),
+        },
+      });
+      return { dto, outboxId: outbox.id };
+    });
+
+    const unreadCount = await this.getUnreadNotificationCount(userId);
+    if (getActiveSocketServer()) {
+      emitToUserRoom(userId, SOCKET_EVENTS.NOTIFICATION_NEW, {
+        notification: created.dto,
+        unreadCount,
+      });
+    }
+
+    const push = await pushNotificationService.sendNotificationToUser(
+      created.dto,
+      user.role,
+      unreadCount,
+    );
+
+    return {
+      notification: created.dto,
+      push,
+    };
   }
 }
 

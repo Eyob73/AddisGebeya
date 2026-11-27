@@ -672,10 +672,15 @@ export class AuthService {
   }
 
   async logoutAll(userId: string) {
-    await prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await Promise.all([
+      prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      prisma.pushSubscription.deleteMany({
+        where: { userId },
+      }),
+    ]);
 
     return { success: true, message: "Logged out from all devices successfully." };
   }
@@ -734,6 +739,10 @@ export class AuthService {
     await prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+
+    await prisma.pushSubscription.deleteMany({
+      where: { userId },
     });
 
     return { deactivated: true, message: "Your account has been deactivated. All active sessions revoked." };

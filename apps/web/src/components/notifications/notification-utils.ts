@@ -12,7 +12,6 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
-import type { NotificationDto } from "@addisgebeya/types";
 
 export function formatRelativeTime(isoDate: string): string {
   const date = new Date(isoDate);
@@ -194,50 +193,5 @@ export function getNotificationVisualMeta(type: string): NotificationVisualMeta 
   };
 }
 
-export function getNotificationNavigationHref(
-  notification: NotificationDto,
-  userRole?: "customer" | "admin",
-): string | null {
-  const entityType = notification.relatedEntityType;
-  const entityId = notification.relatedEntityId;
-  const isAdmin = userRole === "admin";
-  const type = notification.type.toLowerCase();
-
-  if (entityType === "order" && entityId) {
-    return isAdmin
-      ? `/admin/orders?search=${encodeURIComponent(entityId)}`
-      : `/account/tracking?order=${encodeURIComponent(entityId)}`;
-  }
-
-  if (entityType === "payment" && entityId) {
-    if (isAdmin) {
-      return `/admin/payments?search=${encodeURIComponent(entityId)}`;
-    }
-    if (
-      type.includes("rejected") ||
-      type.includes("manual_review") ||
-      type.includes("receipt_submitted")
-    ) {
-      return `/checkout?order=${encodeURIComponent(entityId)}`;
-    }
-    return `/account/tracking?order=${encodeURIComponent(entityId)}`;
-  }
-
-  if (entityType === "product" && entityId) {
-    if (isAdmin) {
-      const searchHint =
-        typeof notification.metadata?.sku === "string" && notification.metadata.sku.trim()
-          ? notification.metadata.sku
-          : entityId;
-      return `/admin/inventory?search=${encodeURIComponent(searchHint)}`;
-    }
-    return `/products/${encodeURIComponent(entityId)}`;
-  }
-
-  if (entityType === "customer") {
-    return isAdmin ? "/admin/customers" : "/account";
-  }
-
-  return null;
-}
+export { getNotificationNavigationHref } from "@addisgebeya/shared";
 

@@ -141,3 +141,51 @@ export interface SocketAdminActivityPayload {
   timestamp: string;
 }
 
+export interface PushSubscriptionKeysDto {
+  p256dh: string;
+  auth: string;
+}
+
+export interface PushSubscriptionSummaryDto {
+  id: string;
+  endpoint: string;
+  userAgent: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PushSubscriptionStatusResponse {
+  configured: boolean;
+  vapidPublicKey: string | null;
+  pushEnabled: boolean;
+  subscribed: boolean;
+  deviceCount: number;
+  devices: PushSubscriptionSummaryDto[];
+}
+
+export interface PushSubscribeResponse {
+  subscription: PushSubscriptionSummaryDto;
+  status: PushSubscriptionStatusResponse;
+}
+
+export interface PushUnsubscribeResponse {
+  unsubscribed: boolean;
+  removedCount: number;
+  status: PushSubscriptionStatusResponse;
+}
+
+export interface WebPushNotificationPayload {
+  notificationId: string;
+  title: string;
+  body: string;
+  icon: string;
+  badge: string;
+  tag: string;
+  timestamp: number;
+  type: string;
+  url: string;
+  relatedEntityId: string | null;
+  relatedEntityType: string | null;
+  unreadCount?: number;
+}
+

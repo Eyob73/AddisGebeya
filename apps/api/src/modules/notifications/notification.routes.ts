@@ -6,11 +6,37 @@ import {
   adminDispatchNotificationSchema,
   notificationIdParamSchema,
   notificationListQuerySchema,
+  pushStatusQuerySchema,
+  subscribePushNotificationSchema,
+  unsubscribePushNotificationSchema,
+  updatePushPreferencesSchema,
 } from "./notification.validation.js";
 
 const notificationRouter: Router = Router();
 
 notificationRouter.use(requireAuth);
+
+notificationRouter.get(
+  "/push/status",
+  validateRequest({ query: pushStatusQuerySchema }),
+  notificationController.getPushStatus,
+);
+notificationRouter.post(
+  "/push/subscribe",
+  validateRequest({ body: subscribePushNotificationSchema }),
+  notificationController.subscribePush,
+);
+notificationRouter.post(
+  "/push/unsubscribe",
+  validateRequest({ body: unsubscribePushNotificationSchema }),
+  notificationController.unsubscribePush,
+);
+notificationRouter.patch(
+  "/push/preferences",
+  validateRequest({ body: updatePushPreferencesSchema }),
+  notificationController.updatePushPreferences,
+);
+notificationRouter.post("/push/test", notificationController.sendTestPush);
 
 notificationRouter.get(
   "/",

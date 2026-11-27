@@ -5,11 +5,13 @@ import { z } from "zod";
 const clientEnvSchema = z.object({
   NEXT_PUBLIC_API_URL: z.string().url().default("http://localhost:5000/api/v1"),
   NEXT_PUBLIC_SOCKET_URL: z.string().url().optional(),
+  NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().optional().default(""),
 });
 
 const parsed = clientEnvSchema.safeParse({
   NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   NEXT_PUBLIC_SOCKET_URL: process.env.NEXT_PUBLIC_SOCKET_URL || undefined,
+  NEXT_PUBLIC_VAPID_PUBLIC_KEY: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
 });
 
 const apiUrl = parsed.success ? parsed.data.NEXT_PUBLIC_API_URL : "http://localhost:5000/api/v1";
@@ -49,4 +51,5 @@ export const clientEnv = {
     parsed.success && parsed.data.NEXT_PUBLIC_SOCKET_URL
       ? parsed.data.NEXT_PUBLIC_SOCKET_URL
       : deriveSocketOrigin(apiUrl),
+  vapidPublicKey: parsed.success ? parsed.data.NEXT_PUBLIC_VAPID_PUBLIC_KEY.trim() : "",
 } as const;

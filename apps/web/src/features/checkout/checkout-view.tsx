@@ -26,6 +26,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { CheckoutAuthSection } from "@/components/checkout/checkout-auth-section";
+import { PushPermissionPrompt } from "@/components/notifications/PushPermissionPrompt";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { CheckoutPageSkeleton } from "@/components/shared/page-skeletons";
 import { useGoogleOneTap } from "@/hooks/use-google-one-tap";
@@ -607,6 +608,8 @@ export function CheckoutView() {
                 }}
               />
             ) : null}
+
+            {isAuthenticated ? <PushPermissionPrompt context="order" /> : null}
 
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
               {isAuthenticated ? (
